@@ -118,15 +118,39 @@ def extract_audio(video: str | Path, out_wav: str | Path, sample_rate: int = 16_
     return out_wav
 
 
+def read_audio(path: str | Path, sample_rate: int = 16_000) -> np.ndarray:
+    """Decode any audio or video file to mono ``float32`` samples in [-1, 1].
+
+    Speech recognition takes this array directly. Decoding here, through the same ffmpeg
+    binary as everything else, keeps the recogniser's own audio stack out of the picture.
+    An hour of audio at 16 kHz is about 230 MB.
+    """
+    raw = _run(
+        [
+            _binary("ffmpeg"), "-v", "error", "-nostdin",
+            "-i", str(path),
+            "-vn", "-ac", "1", "-ar", str(sample_rate),
+            "-f", "f32le", "-acodec", "pcm_f32le",
+            "pipe:1",
+        ],
+        capture_stdout=True,
+    )  # fmt: skip
+    samples = np.frombuffer(raw, dtype=np.float32)
+    if samples.size == 0:
+        raise FfmpegError(f"no audio could be decoded from {Path(path).name}")
+    return samples
+
+
 def read_gray_frames(
     video: str | Path, fps: float = 1.0, size: tuple[int, int] = (160, 90)
 ) -> np.ndarray:
     """Decode the video to small greyscale frames, sampled at ``fps``.
 
-    Returns a ``uint8`` array of shape ``(n_frames, height, width)``. Frame ``i`` shows the
-    video at time ``i / fps`` seconds. ``size`` is ``(width, height)``; the aspect ratio is
-    not preserved, which is harmless for change detection and keeps masks (given as
-    fractions of the frame) valid for any source resolution.
+    Returns a ``uint8`` array of shape ``(n_frames, height, width)``. Frame ``i`` is the
+    source frame nearest to time ``i / fps``, so a cut is located to within half a sample
+    period (0.5 s at 1 fps). ``size`` is ``(width, height)``; the aspect ratio is not
+    preserved, which is harmless for change detection and keeps masks (given as fractions
+    of the frame) valid for any source resolution.
     """
     width, height = size
     raw = _run(

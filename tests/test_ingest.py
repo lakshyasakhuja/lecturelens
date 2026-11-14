@@ -40,6 +40,14 @@ def test_extract_audio_is_16khz_mono_pcm(lecture_video, tmp_path):
     assert not list(wav_path.parent.glob("*.partial.wav"))
 
 
+def test_read_audio_returns_normalised_mono_samples(lecture_video):
+    path, _, seconds = lecture_video
+    samples = ingest.read_audio(path)
+    assert samples.dtype == np.float32 and samples.ndim == 1
+    assert len(samples) / 16_000 == pytest.approx(seconds, abs=0.5)
+    assert 0.05 < np.abs(samples).max() <= 1.0  # the tone is audible and not clipped
+
+
 def test_gray_frames_are_one_per_second_and_time_aligned(lecture_video, lecture_frames):
     path, _, seconds = lecture_video
     source, _ = lecture_frames

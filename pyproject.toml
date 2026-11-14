@@ -75,6 +75,7 @@ target-version = "py310"
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
 ignore = [
     "E501",   # line length is handled by the formatter
+    "SIM905", # a whitespace-separated word list is more readable than 125 quoted lines
     "RUF001", # the multiplication sign and plus-minus are intentional in docstrings
     "RUF002",
     "RUF003",
