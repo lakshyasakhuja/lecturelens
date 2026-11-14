@@ -1,0 +1,28 @@
+# Per-lecture settings for slide-change detection.
+#
+# masks: regions of the frame to ignore when comparing frames, because they move for reasons
+#        that have nothing to do with the slide (webcam overlay, player progress bar, clock).
+#        Each mask is [x0, y0, x1, y1] as fractions of the frame, with (0, 0) at the top-left
+#        and (1, 1) at the bottom-right.
+#
+# camera: true when the recording is a camera pointed at a projector rather than a screen
+#         capture. Frames are blurred before comparison so sensor noise and focus hunting do
+#         not look like slide changes.
+#
+# Any field of lecturelens.slides.SlideConfig (t_high, t_low, min_stable_s, ...) can also be
+# overridden here for one lecture.
+#
+# `defaults` applies to every lecture; an entry under `lectures` overrides it for that id.
+
+defaults:
+  masks: []
+  camera: false
+
+lectures: {}
+  # Example:
+  # lec01:
+  #   masks:
+  #     - [0.78, 0.72, 1.00, 1.00]   # webcam overlay, bottom-right corner
+  #     - [0.00, 0.96, 1.00, 1.00]   # player progress bar
+  # lec07:
+  #   camera: true
