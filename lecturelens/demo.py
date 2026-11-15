@@ -80,7 +80,8 @@ LECTURES: tuple[DemoLecture, ...] = (
                 bullets=("Introduction to Machine Learning", "Demo lecture one"),
                 narration=(
                     "Welcome back. Today we look at why a model that does well on its training "
-                    "data can still fail on new data, and what we can do about it."
+                    "data can still fail on new data, and what we can do about it. We will meet "
+                    "the validation set, overfitting, and three ways to fight it."
                 ),
             ),
             DemoSlide(
@@ -181,7 +182,9 @@ LECTURES: tuple[DemoLecture, ...] = (
                 title="Neural Networks and Gradient Descent",
                 bullets=("Introduction to Machine Learning", "Demo lecture two"),
                 narration=(
-                    "In this lecture we build a small neural network and work out how to train it."
+                    "In this lecture we build a small neural network and work out how to train "
+                    "it. We start with the structure of the network, then look at gradient "
+                    "descent, and finish with backpropagation."
                 ),
             ),
             DemoSlide(

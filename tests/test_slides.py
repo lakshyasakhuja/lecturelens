@@ -235,6 +235,56 @@ def test_noise_lift_is_capped_so_motion_is_not_mistaken_for_noise():
     assert [seg.kind for seg in detection.segments] == ["dynamic"]
 
 
+def _animation() -> tuple[np.ndarray, list[np.ndarray]]:
+    """Slide A, then four 5-second animation steps of slide B, then B's final state."""
+    a = syn.slide_image(41)
+    b = syn.slide_image(42, picture=True)
+    steps = []
+    for k in range(4):  # a bright marker sweeps across B's picture: content replaced each step
+        frame = b.copy()
+        frame[50:70, 100 + 12 * k : 110 + 12 * k] = 0.05
+        steps.append(frame)
+    frames = syn.timeline(
+        [syn.hold(a, 30), *[syn.hold(step, 5) for step in steps], syn.hold(b, 30)]
+    )
+    return frames, steps
+
+
+def test_animation_steps_are_grouped_into_segments_of_useful_length():
+    frames, _ = _animation()
+    every_step = detect_slides(syn.to_uint8(frames), SlideConfig(min_segment_s=0))
+    # Each move of the marker replaces content, so it is a cut. Its final disappearance
+    # only removes content (one-sided), so that one is absorbed by the change score.
+    assert boundaries(every_step) == [30, 35, 40, 45]
+
+    detection = detect_slides(syn.to_uint8(frames))
+    # The 5 s steps resemble each other and slide B, never slide A. They pair up until a
+    # group reaches the minimum length; the cut from A survives untouched.
+    assert boundaries(detection) == [30, 40]
+    assert all(seg.duration >= 10 for seg in detection.segments)
+    assert detection.segments[-1].t_end == 80
+    assert detection.segments[-1].keyframe_t == 79  # B's final state, not a mid-animation frame
+
+
+def test_short_segment_joins_the_neighbour_it_resembles():
+    a, b = syn.slide_image(43), syn.slide_image(44, picture=True)
+    late_a = a.copy()
+    late_a[60:75, 20:60] = 0.3  # slide A with one more element, shown briefly
+    frames = syn.timeline([syn.hold(a, 30), syn.hold(late_a, 6), syn.hold(b, 30)])
+    detection = detect_slides(syn.to_uint8(frames))
+    assert boundaries(detection) == [36]  # the 6 s segment went with A, the cut to B stays
+    assert detection.segments[0].keyframe_t == 35  # and A's keyframe is its fuller, later state
+
+
+def test_short_segment_between_dynamic_stretches_is_left_alone():
+    frames = syn.timeline(
+        [syn.churn(20, seed=11), syn.hold(syn.slide_image(45), 6), syn.churn(20, seed=12)]
+    )
+    segments = detect_slides(syn.to_uint8(frames)).segments
+    assert [seg.kind for seg in segments] == ["dynamic", "slide", "dynamic"]
+    assert segments[1].duration == 6
+
+
 def test_ssim_metric_finds_the_same_cuts(lecture_frames):
     frames, cuts = lecture_frames
     detection = detect_slides(syn.to_uint8(frames), SlideConfig(metric="ssim"))

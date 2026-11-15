@@ -54,7 +54,14 @@ How it works
    The hash alone is not enough, because two different text slides on the same template can
    share their low-frequency structure.
 
-7. **Adaptive thresholds.** ``t_low`` and ``t_high`` are floors. If a recording is noisier
+7. **Absorb very short segments.** A slide that animates (a filter sliding across an image,
+   a diagram assembling itself) changes every few seconds, and each step that replaces
+   content is a segment. A segment shorter than ``min_segment_s`` is not worth a search
+   result of its own: it holds a sentence or two of speech. It is folded into whichever
+   neighbouring slide segment its keyframe resembles more, and the merged segment keeps the
+   later keyframe. A short segment with no slide neighbour is left alone.
+
+8. **Adaptive thresholds.** ``t_low`` and ``t_high`` are floors. If a recording is noisier
    than the floor allows (a filmed projector), the whole band is shifted up to sit above
    the lecture's own noise level, estimated robustly as ``median + 4 x MAD`` of ``d``.
    The shift is additive because noise adds to a change score rather than scaling it. It is
@@ -103,6 +110,9 @@ class SlideConfig:
     min_stable_s: float = 3.0
     dynamic_min_s: float = 12.0
     merge_bits: int = 8  # max Hamming distance between 64-bit perceptual hashes
+    # Slide segments shorter than this are folded into the neighbour they most resemble.
+    # 0 keeps every segment.
+    min_segment_s: float = 10.0
     camera: bool = False  # camera pointed at a projector, rather than a screen capture
     blur: float | None = None  # Gaussian sigma in detection pixels; None: 1.0 if camera else 0
     masks: tuple[Mask, ...] = ()
@@ -461,6 +471,41 @@ def _merge(
     return merged
 
 
+def _absorb_short(
+    spans: Sequence[_Span], frames: np.ndarray, dist: Distance, min_length: int
+) -> list[_Span]:
+    """Fold slide segments shorter than ``min_length`` frames into a neighbouring slide.
+
+    Works left to right. A short segment joins the previous or the next slide segment,
+    whichever keyframe is closer to its own; the merged segment keeps the later keyframe,
+    which for an animation is the more complete picture. Merging can make the next short
+    segment's neighbour longer, so a run of animation steps collapses into one segment.
+    """
+    if min_length <= 1:
+        return list(spans)
+    out: list[_Span] = []
+    pending = [_Span(s.start, s.end, s.keyframe, s.kind) for s in spans]
+    i = 0
+    while i < len(pending):
+        span = pending[i]
+        short = span.kind == "slide" and (span.end - span.start) < min_length
+        prev = out[-1] if out and out[-1].kind == "slide" else None
+        nxt = pending[i + 1] if i + 1 < len(pending) and pending[i + 1].kind == "slide" else None
+        if not short or (prev is None and nxt is None):
+            out.append(span)
+            i += 1
+            continue
+        to_prev = dist(frames[span.keyframe], frames[prev.keyframe]) if prev else float("inf")
+        to_next = dist(frames[span.keyframe], frames[nxt.keyframe]) if nxt else float("inf")
+        if to_prev <= to_next:
+            out[-1] = _Span(prev.start, span.end, span.keyframe, "slide")
+            i += 1
+        else:
+            pending[i + 1] = _Span(span.start, nxt.end, nxt.keyframe, "slide")
+            i += 1
+    return out
+
+
 def detect_slides(frames: np.ndarray, config: SlideConfig | None = None) -> Detection:
     """Segment a stack of detection frames into slides.
 
@@ -493,6 +538,7 @@ def _detect_prepared(
         dynamic_min=max(1, round(config.dynamic_min_s * fps)),
     )
     merged = _merge(spans, prepared, dist, t_high, config.merge_bits)
+    merged = _absorb_short(merged, prepared, dist, round(config.min_segment_s * fps))
     segments = [
         SlideSegment(
             t_start=span.start / fps,

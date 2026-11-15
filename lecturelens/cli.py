@@ -77,8 +77,10 @@ def index(
     ),
     only: str | None = typer.Option(None, help="Comma-separated lecture ids to process."),
     asr_model: str = typer.Option("large-v3-turbo", help="faster-whisper model name."),
-    device: str = typer.Option(
-        "auto", help="auto, cuda, mps or cpu (encoders). ASR uses cuda or cpu."
+    device: str = typer.Option("auto", help="Device for the encoders: auto, cuda, mps or cpu."),
+    asr_device: str = typer.Option(
+        "auto",
+        help="Device for speech recognition: auto (cuda if present, else cpu), cuda, mps or cpu.",
     ),
     jargon_boost: bool = typer.Option(
         True, help="Hint speech recognition with terms read off the slides."
@@ -123,7 +125,6 @@ def index(
             len(uncatalogued), catalog, ", ".join(uncatalogued),
         )  # fmt: skip
 
-    asr_device = device if device in ("cuda", "cpu") else "auto"
     config = PipelineConfig(
         asr=AsrConfig(model=asr_model, device=asr_device),
         embed=EmbedConfig(device=device),

@@ -68,7 +68,7 @@ class PipelineConfig:
 # Bump a stage's number when its logic changes in a way that makes cached results stale.
 # It is part of the stage's fingerprint, so existing work directories recompute that stage
 # (and everything downstream) instead of silently keeping the old output.
-STAGE_VERSION = {"segments": 1, "keyframes": 1, "ocr": 2, "asr": 2, "moments": 1, "vectors": 1}
+STAGE_VERSION = {"segments": 2, "keyframes": 1, "ocr": 2, "asr": 2, "moments": 1, "vectors": 1}
 
 
 def fingerprint(*parts: Any) -> str:

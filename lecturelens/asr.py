@@ -34,8 +34,11 @@ from lecturelens.text import STOPWORDS
 @dataclass(frozen=True)
 class AsrConfig:
     model: str = "large-v3-turbo"
-    device: str = "auto"  # "auto", "cuda" or "cpu"
-    compute_type: str = "auto"  # "auto": float16 on GPU, int8 on CPU
+    # "auto" picks CUDA when there is one, else the CPU. "mps" (Apple GPU) must be asked for:
+    # CTranslate2 calls that backend experimental, though it ran about twice as fast as the
+    # CPU on an M4 with near-identical output.
+    device: str = "auto"
+    compute_type: str = "auto"  # "auto": float16 on a GPU, int8 on CPU
     language: str = "en"
     beam_size: int = 5
     vad_filter: bool = True
@@ -94,7 +97,7 @@ def resolve_device(device: str = "auto", compute_type: str = "auto") -> tuple[st
 
         device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
     if compute_type == "auto":
-        compute_type = "float16" if device == "cuda" else "int8"
+        compute_type = "int8" if device == "cpu" else "float16"
     return device, compute_type
 
 
