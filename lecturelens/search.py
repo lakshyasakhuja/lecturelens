@@ -31,6 +31,7 @@ index side is matrix products over a few thousand rows.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -294,6 +295,7 @@ class Searcher:
         if name not in self._bm25:
             import bm25s
 
+            logging.getLogger("bm25s").setLevel(logging.WARNING)  # it logs every build at DEBUG
             fields = LEXICAL_FIELDS[name]
             moments = self.index.moments
             corpus = [
