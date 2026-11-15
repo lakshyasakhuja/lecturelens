@@ -26,8 +26,8 @@ dependencies = [
 # Query and document encoders. Needed online (to embed a query) and offline (to embed moments).
 models = [
     "torch>=2.4",
-    "transformers>=4.51",
-    "sentence-transformers>=3.3",
+    "transformers>=5.0",
+    "sentence-transformers>=5.0",
     "sentencepiece>=0.2",
     "protobuf>=4",
 ]
@@ -42,7 +42,7 @@ index = [
 eval = [
     "jiwer>=3",
     "matplotlib>=3.8",
-    "scenedetect[opencv-headless]>=0.6.4",
+    "scenedetect>=0.6.4",
 ]
 
 [project.scripts]

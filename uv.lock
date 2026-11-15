@@ -1076,12 +1076,12 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "rapidocr", marker = "extra == 'index'", specifier = ">=3.2" },
     { name = "rich", specifier = ">=13" },
-    { name = "scenedetect", extras = ["opencv-headless"], marker = "extra == 'eval'", specifier = ">=0.6.4" },
+    { name = "scenedetect", marker = "extra == 'eval'", specifier = ">=0.6.4" },
     { name = "scipy", specifier = ">=1.11" },
-    { name = "sentence-transformers", marker = "extra == 'models'", specifier = ">=3.3" },
+    { name = "sentence-transformers", marker = "extra == 'models'", specifier = ">=5.0" },
     { name = "sentencepiece", marker = "extra == 'models'", specifier = ">=0.2" },
     { name = "torch", marker = "extra == 'models'", specifier = ">=2.4" },
-    { name = "transformers", marker = "extra == 'models'", specifier = ">=4.51" },
+    { name = "transformers", marker = "extra == 'models'", specifier = ">=5.0" },
     { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["models", "index", "eval"]
