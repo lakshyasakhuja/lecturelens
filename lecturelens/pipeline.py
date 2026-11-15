@@ -71,6 +71,12 @@ class PipelineConfig:
     thumb_width: int = 480
 
 
+# Bump a stage's number when its logic changes in a way that makes cached results stale.
+# It is part of the stage's fingerprint, so existing work directories recompute that stage
+# (and everything downstream) instead of silently keeping the old output.
+STAGE_VERSION = {"segments": 1, "keyframes": 1, "ocr": 2, "asr": 2, "moments": 1, "vectors": 1}
+
+
 def fingerprint(*parts: Any) -> str:
     """A short stable hash of JSON-serialisable inputs."""
     blob = json.dumps(parts, sort_keys=True, default=str).encode("utf-8")
@@ -161,7 +167,7 @@ class Indexer:
         # 1. Slide segmentation -----------------------------------------------------------
         slide_cfg = load_slide_config(cfg.masks_path, lecture.lecture_id, cfg.slides)
         segments_path = work / "segments.json"
-        segments_key = fingerprint(video_key, asdict(slide_cfg))
+        segments_key = fingerprint(STAGE_VERSION["segments"], video_key, asdict(slide_cfg))
         if not cache.fresh("segments", segments_key, segments_path):
             started = time.perf_counter()
             frames = ingest.read_gray_frames(video, fps=slide_cfg.fps, size=slide_cfg.size)
@@ -189,7 +195,9 @@ class Indexer:
         # 2. Keyframe stills ---------------------------------------------------------------
         keyframe_times = sorted({w.keyframe_t for w in windows})
         keyframe_dir = work / "keyframes"
-        keyframes_key = fingerprint(segments_key, asdict(cfg.moments), cfg.keyframe_max_width)
+        keyframes_key = fingerprint(
+            STAGE_VERSION["keyframes"], segments_key, asdict(cfg.moments), cfg.keyframe_max_width
+        )
         if not cache.fresh("keyframes", keyframes_key, keyframe_dir):
             started = time.perf_counter()
             if keyframe_dir.exists():  # segmentation changed: old stills no longer apply
@@ -208,7 +216,7 @@ class Indexer:
 
         # 3. OCR -----------------------------------------------------------------------------
         ocr_path = work / "ocr.json"
-        ocr_key = fingerprint(keyframes_key, asdict(cfg.ocr))
+        ocr_key = fingerprint(STAGE_VERSION["ocr"], keyframes_key, asdict(cfg.ocr))
         if not cache.fresh("ocr", ocr_key, ocr_path):
             started = time.perf_counter()
             pages = {
@@ -226,7 +234,7 @@ class Indexer:
         # 4. Speech recognition ---------------------------------------------------------------
         hotwords = asr.build_hotwords(slide_texts.values()) if cfg.jargon_boost else ""
         asr_path = work / "asr.jsonl"
-        asr_key = fingerprint(video_key, asdict(cfg.asr), hotwords)
+        asr_key = fingerprint(STAGE_VERSION["asr"], video_key, asdict(cfg.asr), hotwords)
         if not cache.fresh("asr", asr_key, asr_path):
             started = time.perf_counter()
             if info.has_audio:
@@ -247,7 +255,7 @@ class Indexer:
 
         # 5. Moments ---------------------------------------------------------------------------
         moments_path = work / "moments.parquet"
-        moments_key = fingerprint(ocr_key, asr_key, lecture.to_dict())
+        moments_key = fingerprint(STAGE_VERSION["moments"], ocr_key, asr_key, lecture.to_dict())
         if not cache.fresh("moments", moments_key, moments_path):
             moments = build_moments(lecture, windows, words, slide_texts)
             frame = pd.DataFrame([m.to_dict() for m in moments])
@@ -262,7 +270,7 @@ class Indexer:
 
         # 6. Embeddings ------------------------------------------------------------------------
         vectors_path = work / "vectors.npz"
-        vectors_key = fingerprint(moments_key, asdict(cfg.embed))
+        vectors_key = fingerprint(STAGE_VERSION["vectors"], moments_key, asdict(cfg.embed))
         if not cache.fresh("vectors", vectors_key, vectors_path):
             started = time.perf_counter()
             vectors = self._embed(frame, [stills[t] for t in keyframe_times])

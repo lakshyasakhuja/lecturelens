@@ -141,15 +141,54 @@ def test_reading_order_is_top_to_bottom_then_left_to_right():
     ]
 
 
-def test_reading_order_keeps_boxes_on_one_visual_line_together():
+def test_reading_order_joins_boxes_on_one_visual_line():
     # Two boxes on the same line, the right-hand one a couple of pixels higher: sorting by y
-    # alone would put "rate" before "learning".
+    # alone would put "rate" before "learning". They are one line of text, a word gap apart.
     lines = [
         line("rate", 420, 198, 520, 238),
         line("learning", 100, 200, 400, 240),
         line("Next line", 100, 260, 400, 300),
     ]
-    assert [item.text for item in reading_order(lines)] == ["learning", "rate", "Next line"]
+    assert [item.text for item in reading_order(lines)] == ["learning rate", "Next line"]
+
+
+def test_split_lines_are_rejoined_without_the_doubled_character():
+    # Boxes as PP-OCRv5 actually returned them for three bullets of one slide: the detector
+    # split each line, and the padded boxes overlap by about one character.
+    lines = [
+        line("Gradient descent", 69, 64, 524, 119),
+        line("Compute", 121, 196, 297, 239),
+        line("e the", 275, 196, 361, 235),
+        line("gradient of the loss", 356, 188, 711, 241),
+        line("Step in", 116, 275, 257, 329),
+        line("the", 248, 279, 333, 321),
+        line("opposite direction", 314, 276, 649, 328),
+        line("Noisy", 118, 477, 232, 528),
+        line("y but cheap updates", 207, 477, 575, 529),
+        line("Shuffle t", 119, 564, 270, 607),
+        line("the data every epoch", 243, 559, 641, 618),
+    ]
+    assert [item.text for item in reading_order(lines)] == [
+        "Gradient descent",
+        "Compute the gradient of the loss",
+        "Step in the opposite direction",
+        "Noisy but cheap updates",
+        "Shuffle the data every epoch",
+    ]
+
+
+def test_joined_line_keeps_the_union_box_and_the_lower_confidence():
+    left = OcrLine("Noisy", 0.99, (118, 477, 232, 528))
+    right = OcrLine("y but cheap updates", 0.90, (207, 477, 575, 529))
+    (joined,) = reading_order([right, left])
+    assert joined.box == (118, 477, 575, 529)
+    assert joined.confidence == 0.90
+
+
+def test_a_short_word_is_not_dropped_unless_the_boxes_overlap():
+    # "a" follows "data" with a normal word gap: both are real words, nothing was doubled.
+    lines = [line("training data", 100, 200, 400, 240), line("a second time", 412, 200, 700, 240)]
+    assert [item.text for item in reading_order(lines)] == ["training data a second time"]
 
 
 def test_reading_order_handles_columns_row_by_row():

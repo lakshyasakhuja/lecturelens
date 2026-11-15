@@ -5,9 +5,10 @@ RapidOCR rather than through PaddlePaddle. The weights are the same; the runtime
 wheel with no CUDA build of its own, so it installs next to PyTorch on a GPU notebook
 without the two fighting over CUDA libraries.
 
-OCR returns text boxes in detection order, which is not reading order. ``reading_order``
-groups boxes into rows by vertical overlap and sorts each row left to right, so a slide
-reads title first, then bullets top to bottom.
+OCR returns text boxes in detection order, which is not reading order, and the detector
+sometimes splits one line of text into several boxes. ``reading_order`` groups boxes into
+rows, sorts each row left to right, and joins the fragments of a line back together, so a
+slide reads title first, then each bullet as one line, top to bottom.
 """
 
 from __future__ import annotations
@@ -72,8 +73,8 @@ class SlideText:
         return cls(tuple(OcrLine.from_dict(line) for line in data.get("lines", [])))
 
 
-def reading_order(lines: Sequence[OcrLine]) -> list[OcrLine]:
-    """Sort text boxes top to bottom, and left to right within a row.
+def group_rows(lines: Sequence[OcrLine]) -> list[list[OcrLine]]:
+    """Group text boxes into visual rows, top to bottom, each row sorted left to right.
 
     Two boxes share a row when the second one's vertical centre lies within half a line
     height of the row's. Sorting by ``y`` alone would interleave boxes that sit on the same
@@ -89,7 +90,58 @@ def reading_order(lines: Sequence[OcrLine]) -> list[OcrLine]:
                 row.append(line)
                 continue
         rows.append([line])
-    return [line for row in rows for line in sorted(row, key=lambda item: item.box[0])]
+    return [sorted(row, key=lambda item: item.box[0]) for row in rows]
+
+
+def _join(left: OcrLine, right: OcrLine) -> OcrLine:
+    """Join two fragments of one text line, removing a character read twice at the seam.
+
+    The detector pads every box, so when it splits a line, neighbouring boxes overlap by
+    about a character and the recogniser reads that character in both: ``"Noisy"`` then
+    ``"y but cheap"``, or ``"Shuffle t"`` then ``"the data"``. If the boxes overlap and a
+    one- or two-letter token at the seam repeats the edge of its neighbour, it is dropped.
+    """
+    left_tokens, right_tokens = left.text.split(), right.text.split()
+    if left.box[2] > right.box[0] and left_tokens and right_tokens:
+        tail, head = left_tokens[-1], right_tokens[0]
+        if len(head) <= 2 and len(tail) > len(head) and tail.endswith(head):
+            right_tokens = right_tokens[1:]
+        elif len(tail) <= 2 and len(head) > len(tail) and head.startswith(tail):
+            left_tokens = left_tokens[:-1]
+    return OcrLine(
+        text=" ".join(left_tokens + right_tokens),
+        confidence=min(left.confidence, right.confidence),
+        box=(
+            min(left.box[0], right.box[0]),
+            min(left.box[1], right.box[1]),
+            max(left.box[2], right.box[2]),
+            max(left.box[3], right.box[3]),
+        ),
+    )
+
+
+def join_row(row: Sequence[OcrLine], max_gap: float = 1.0) -> list[OcrLine]:
+    """Merge the fragments of a row that belong to one line of text.
+
+    Neighbours are joined when the gap between them is at most ``max_gap`` line heights
+    (an ordinary word space, or an overlap). A wider gap means separate columns, which stay
+    separate lines.
+    """
+    merged: list[OcrLine] = []
+    for line in row:
+        if merged:
+            previous = merged[-1]
+            gap = line.box[0] - previous.box[2]
+            if gap <= max_gap * min(previous.height, line.height):
+                merged[-1] = _join(previous, line)
+                continue
+        merged.append(line)
+    return merged
+
+
+def reading_order(lines: Sequence[OcrLine]) -> list[OcrLine]:
+    """Text lines in reading order: rows top to bottom, fragments of a line joined."""
+    return [line for row in group_rows(lines) for line in join_row(row)]
 
 
 class OcrEngine:
