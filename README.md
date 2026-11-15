@@ -1,10 +1,34 @@
 # LectureLens
 
+[![CI](https://github.com/lakshyasakhuja/lecturelens/actions/workflows/ci.yml/badge.svg)](https://github.com/lakshyasakhuja/lecturelens/actions/workflows/ci.yml)
+
 Semantic search for lecture recordings. Ask a question in plain English, such as *"where did she explain why we need a validation set?"*, and jump straight to that moment in the video.
 
 Each result is ranked using three signals: what was **said**, what text was **on the slide**, and what the slide **looked like**.
 
-> **Status: in development.** The design below is settled, the code is being built. No numbers are reported yet, and the results sections will only ever be filled with measured values.
+```console
+$ lecturelens search "the student who memorises last year's exam answers"
+
+1. Generalisation and Overfitting  at  1:00   said
+   … is to stop training early. Think of a student preparing for an exam by
+   memorising last year's answers. They score perfectly on the old paper and
+   badly on the new one. Stopping early is like telling that student to stop …
+   bm25 #1  dense #1  image #6
+   file:///…/demo01.mp4#t=60
+```
+
+## Status
+
+| Part | State |
+|---|---|
+| Indexing pipeline: slide segmentation, OCR, speech recognition, moments, embeddings | Built. Runs end to end with the real models. |
+| Search: BM25 + dense + image, rank fusion, deduplication, explanations, optional reranker | Built. |
+| CLI, resumable and incremental indexing, publishing to Hugging Face | Built. |
+| Evaluation harness: retrieval ablations, slide transitions, word error rate | Built, and exercised end to end on synthetic lectures. |
+| **Benchmark results on real lectures** | **Not yet.** Needs a course to be indexed and queries to be annotated. No numbers are claimed until then. |
+| Web demo | Not yet. |
+
+More than 200 unit tests run in CI on every push, with no model downloads. A further integration test (`pytest -m models`) runs the whole system with the real models on synthetic lectures.
 
 ---
 
@@ -14,48 +38,82 @@ Lectures run one to two hours. Finding the three minutes you need before an exam
 
 Keyword search over a transcript helps only when you remember the exact words the lecturer used. It fails when you describe the idea in your own words, when the term only appeared on a slide, or when what you remember is a picture ("the plot where validation loss goes back up").
 
-## What it does
+## Try it in five minutes
 
-- Searches a whole library of lectures at once, not one recording at a time
-- Returns the top 5 moments, each with a timestamp, slide thumbnail, text snippet, and a badge showing which signal matched (`said`, `on slide`, `visual`)
-- Links open the video at the matching timestamp, so no video is rehosted
-- Ships as a public web demo over open-licensed lectures, and as a local CLI for indexing your own recordings privately
+No lecture videos needed: `lecturelens demo` generates two short synthetic lectures (rendered slides, a text-to-speech voice) with ground truth for every stage.
 
-### Scope of v1
+Requirements: Python 3.10 to 3.12, [`uv`](https://docs.astral.sh/uv/), `ffmpeg`, and for the demo a text-to-speech command (`say` on macOS, `espeak-ng` on Linux). The first run downloads about 5 GB of model weights.
 
-| In scope | Out of scope |
+```bash
+git clone https://github.com/lakshyasakhuja/lecturelens.git
+```
+
+```bash
+cd lecturelens && uv sync --extra index --extra eval
+```
+
+```bash
+uv run lecturelens demo demo
+```
+
+```bash
+uv run lecturelens index demo/videos --catalog demo/lectures.csv --out demo/index --work demo/work
+```
+
+```bash
+uv run lecturelens search "why do we hold out data we never train on" --index demo/index
+```
+
+On an Apple M4 laptop with no GPU, once the models are downloaded, indexing the three minutes of demo video takes about 90 seconds, and a query takes about 100 ms including both query encoders.
+
+## Search your own lectures
+
+Put one video per lecture in a folder and index it. Everything stays on your machine: nothing is uploaded, and results link back to the local files.
+
+```bash
+uv run lecturelens index ~/lectures/comp5318 --out ~/lectures/comp5318-index --work ~/lectures/comp5318-work
+```
+
+```bash
+uv run lecturelens search "what is the kernel trick" --index ~/lectures/comp5318-index
+```
+
+University recordings and slides belong to the institution and its lecturers. Index them for personal study only; do not publish the index.
+
+| Command | What it does |
 |---|---|
-| Slide-based lectures (screen capture, or a camera on the projector) | Chalkboard and handwriting-heavy lectures |
-| English | Other languages |
-| A library of 5 to 15 lectures | Generated answers (retrieval only) |
-| Web demo on a prebuilt index, plus a local CLI | Uploading and indexing videos in the public demo |
+| `lecturelens index <videos>` | Build or update an index. Cached per stage, so it resumes after an interruption and only processes new lectures. |
+| `lecturelens search "<query>"` | Top moments with timestamps, snippets, badges and links. `--lecture` to filter, `--rerank` for the cross-encoder, `--json` for scripts. |
+| `lecturelens info` | What an index contains and which models built it. |
+| `lecturelens slides <video> --sheet out.jpg` | Run slide detection alone and write a contact sheet of keyframes, to check masks and thresholds before indexing. |
+| `lecturelens push / pull <repo>` | Publish or fetch an index as a Hugging Face dataset, with an attribution card. |
+| `lecturelens demo <dir>` | Generate the synthetic lectures. |
 
 ---
 
 ## How it works
 
-The core design decision is to **index once offline on a GPU and search online on a CPU**. Heavy models run a single time per lecture; a query only needs two small text encoders and a few matrix products.
+The core design decision is to **index once offline on a GPU and search online on a CPU**. Heavy models run a single time per lecture; a query needs two small text encoders and a few matrix products.
 
 ### Offline indexing
 
 ```
  lecture.mp4
    |
-   +--> ffmpeg: audio, 16 kHz mono --> faster-whisper (large-v3-turbo)
-   |                                    --> words with timestamps
+   +--> ffmpeg: 160x90 grey frames at 1 fps, piped into memory
+   |      --> slide-change detector --> slide segments [t0, t1] + keyframe time
+   |             keyframe at native resolution --> PP-OCRv5  --> slide text
+   |             keyframe at native resolution --> SigLIP 2  --> image embedding
    |
-   +--> ffmpeg: frames at 1 fps, 640 px wide
-          --> slide-change detector --> slide segments [t0, t1] + keyframe
-                 keyframe --> PP-OCRv5  --> slide text
-                 keyframe --> SigLIP 2  --> image embedding
+   +--> ffmpeg: audio, 16 kHz mono
+          --> faster-whisper (large-v3-turbo), prompted with jargon from the slides
+          --> words with timestamps
 
- align transcript words to slide segments --> "moments"
- moment text = slide text + transcript
-   --> Qwen3-Embedding-0.6B --> dense text vector
-   --> BM25 index
+ align words to slide segments --> "moments"
+ moment text --> Qwen3-Embedding-0.6B --> three text vectors (both, speech only, slide only)
 ```
 
-A **moment** is the unit of retrieval: one slide segment, with the words spoken while it was on screen. Slides that stay up for more than 90 seconds are split into overlapping 45-second windows so a long explanation is not buried in one large chunk.
+A **moment** is the unit of retrieval: one slide, with the words spoken while it was on screen. A slide that stays up for more than 90 seconds is cut into 45-second windows, spaced evenly so neighbours overlap by at least 15 seconds and the windows sit flush with the slide at both ends.
 
 ### Online search
 
@@ -69,20 +127,38 @@ A **moment** is the unit of retrieval: one slide segment, with the words spoken 
             |
      (optional) rerank top 20 with Qwen3-Reranker-0.6B
             |
-     dedupe near-identical moments --> top 5
+     dedupe into distinct landing points --> top 5, each with an explanation
 ```
 
 ### Design notes
 
-**Slide segmentation.** Frames are compared at 1 fps on a downscaled greyscale image, with per-lecture masks for regions that move for unrelated reasons (webcam overlay, player progress bar). A new segment starts when the frame difference crosses a high threshold and the picture then stays stable for at least 3 seconds, which suppresses cursor movement, laser pointers and animation steps. The keyframe is the **last** stable frame of a segment, because an animated slide is only complete at the end. Neighbouring segments with near-identical perceptual hashes are merged.
+These are the decisions that are not obvious from the diagrams. Each one is covered by tests that isolate it.
 
-**Rank fusion.** BM25 scores, cosine similarities and SigLIP logits sit on different scales. Reciprocal Rank Fusion uses only ranks, so it needs no score calibration and has a single hyperparameter:
+**Slide segmentation is hysteresis against a reference frame.** A segment becomes stable after 3 quiet seconds. It ends when a frame differs from the *most recent quiet frame* by more than a threshold. Comparing against a reference rather than the previous frame means a cross-fade spread over several frames still accumulates and is caught, while a cursor, tablet ink or a bullet appearing is absorbed as the reference moves forward.
+
+**Added content is not replaced content.** Mean absolute pixel difference cannot tell three bullet points appearing from one sparse slide replacing another: both move about the same number of pixels. The sign of the change can. A build only adds ink, so every changed pixel moves the same way; a new slide removes old text and draws new text, so pixels move both ways. The detector splits a change into a balanced part and a one-sided part and counts the one-sided part at a quarter weight. On synthetic slides no single threshold on plain difference gets both cases right; this does ([test](tests/test_slides.py)).
+
+**The keyframe is the last quiet frame of a segment**, because an animated slide is only complete at the end. OCR and the image encoder read it at the video's native resolution, not from the 160x90 detection frame.
+
+**Whisper is prompted with the slides' own vocabulary.** Distinctive terms from the OCR (names, long words, tokens like `L2` and `k-fold`) are passed as hotwords. They are phrased as a sentence, `Glossary: a, b, c.`, because Whisper imitates the style of its prompt: given a bare comma-separated list it stops writing full stops.
+
+**OCR fragments are rejoined.** The detector sometimes splits a line of text into overlapping boxes, so the boundary character is read twice (`Noisy` + `y but cheap updates`). Fragments on one row are merged and the doubled character dropped.
+
+**Rank fusion, not score fusion.** BM25 scores, cosine similarities and SigLIP similarities sit on different scales. Reciprocal Rank Fusion uses only ranks, so it needs no calibration and has one hyperparameter:
 
 ```
-RRF(d) = sum over rankers of 1 / (60 + rank_i(d))
+RRF(d) = sum over rankers of  weight / (60 + rank(d))
 ```
 
-**No vector database.** A library this size is roughly 2,000 moments. Brute-force cosine similarity over a numpy array is sub-millisecond, so a vector store would add setup and nothing else. That changes at hundreds of thousands of moments, or once the index takes concurrent writes.
+**Ties share a rank.** Windows of one long slide share a keyframe and so have identical image scores. Ranked 1, 2, 3, … they would fill the image ranking and push every other slide out. They all take their keyframe's rank instead, and the text rankers choose between them.
+
+**Results are landing points.** Two hits in one lecture that start within 20 seconds of each other would drop the student in the same place, so only the better one is kept.
+
+**A "visual" badge needs evidence.** Some keyframe is always ranked first by the image ranker, even for a query that describes nothing visual. SigLIP is trained with a sigmoid loss, so its similarity converts to a match probability; the badge is shown only when that probability clears a threshold.
+
+**No vector database.** A library this size is a few thousand moments. On a synthetic index of 2,000 moments, the whole of search apart from the two query encoders (three rankers, fusion, deduplication, explanations) takes 1.3 ms at the median on a laptop CPU, and 8 ms at 20,000 moments, so a vector store would add setup and nothing else. That changes at hundreds of thousands of moments, or once the index takes concurrent writes. BM25 structures are not stored either: they are rebuilt from the moments table when the index loads, in about half a second for 2,000 moments, so the stored index can never disagree with the tokeniser in the code.
+
+**Indexing is resumable and incremental.** Each stage writes to a per-lecture work directory and records a fingerprint of its inputs. An interrupted run resumes; a changed setting reruns only what is downstream of it (a new embedding model does not redo speech recognition); a new lecture is processed alone.
 
 ---
 
@@ -93,21 +169,23 @@ RRF(d) = sum over rankers of 1 / (60 + rank_i(d))
 | Environment | Python 3.12, `uv` | Fast, reproducible installs |
 | Video and audio | `ffmpeg` | Standard and fast |
 | Speech recognition | faster-whisper, `large-v3-turbo` | Decoder pruned from 32 layers to 4: much faster than large-v3 at close accuracy |
-| Slide segmentation | Custom frame-difference detector | Tuned for slides; PySceneDetect is the baseline it is measured against |
-| OCR | PaddleOCR 3.x (PP-OCRv5) | Strong on dense slide text |
+| Slide segmentation | Custom detector (see above) | Tuned for slides; PySceneDetect is the baseline it is measured against |
+| OCR | PP-OCRv5 via RapidOCR (ONNX Runtime) | Same weights as PaddleOCR, in a runtime that installs next to PyTorch without a second CUDA stack |
 | Text embeddings | Qwen3-Embedding-0.6B | Open (Apache 2.0), instruction-aware, larger sizes available |
-| Image-text embeddings | SigLIP 2 (`google/siglip2-base-patch16-224`) | Good text-to-image retrieval |
-| Sparse retrieval | `bm25s` | Fast BM25 in pure Python and numpy |
+| Image-text embeddings | SigLIP 2 (`google/siglip2-base-patch16-224`) | Good text-to-image retrieval, with calibrated match probabilities |
+| Sparse retrieval | `bm25s`, Snowball stemming | Fast BM25 in numpy |
 | Reranker (optional) | Qwen3-Reranker-0.6B | Same family as the embedder |
 | Storage | Parquet and numpy arrays | See "No vector database" above |
 
+The package is split along the offline/online line. `uv sync` alone installs the core (index loading, fusion, metrics) with no deep-learning framework; `--extra models` adds the query encoders, `--extra index` adds speech recognition and OCR, `--extra eval` adds the evaluation tools.
+
 ---
 
-## Evaluation plan
+## Evaluation
 
-The goal is not only a working demo but a measurement of **when each signal helps**.
+The goal is not only a working demo but a measurement of **when each signal helps**. The harness is built; the benchmark needs real lectures and hand-written ground truth. The annotation formats and protocol are in [eval/README.md](eval/README.md).
 
-**Query set.** 60 queries over 5 lectures, each with one or more ground-truth time intervals. They are written before retrieval is built, phrased the way a student would ask, and split into 20 dev queries (for tuning) and 40 test queries (reported once, at the end).
+**Query set.** 60 queries over 5 lectures, each with ground-truth time intervals, written before retrieval is tuned and phrased the way a student would ask. 20 are for tuning (dev), 40 for reporting (test).
 
 | Query type | Example | Signal expected to win |
 |---|---|---|
@@ -116,11 +194,11 @@ The goal is not only a working demo but a measurement of **when each signal help
 | Spoken-only | a worked example the lecturer said aloud but never put on a slide | Transcript, not OCR |
 | Visual | "the diagram with the three-layer network" | SigLIP 2 |
 
-**Relevance.** A returned moment counts as relevant if its time span overlaps a ground-truth interval within ±15 seconds: close enough that a student who lands there sees the explanation.
+**Relevance.** A returned moment is relevant if its span overlaps a ground-truth interval within ±15 seconds: close enough that a student who lands there sees the explanation. Overlap is lenient towards long moments (one that merely ends where the answer begins still overlaps), so a stricter **landing** criterion is reported next to it: the result must start inside the answer or at most N seconds before it.
 
-**Metrics.** Recall@1, Recall@5 and MRR@10, overall and per query type, plus CPU query latency (p50, p95) and indexing time per hour of video.
+**Metrics.** Recall@1, Recall@5 and MRR@10, overall and per query type, each with a bootstrap confidence interval, because 40 queries is a small sample. The hybrid is compared with keyword transcript search by a paired bootstrap over the same queries.
 
-**Ablations.** Each system below is evaluated on the same test queries.
+**Ablations.** Every system runs through the same fusion and deduplication as the served system.
 
 | # | System | What it isolates |
 |---|---|---|
@@ -132,23 +210,52 @@ The goal is not only a working demo but a measurement of **when each signal help
 | 6 | Hybrid RRF (2 + 4 + 5) | The full system |
 | 7 | Hybrid + reranker | Whether reranking earns its cost |
 
-The working hypothesis is that BM25 wins keyword queries, dense wins paraphrases, the image signal helps visual queries, and the hybrid is best overall. That is a hypothesis to test, not a result. Whatever happens gets reported, including any query type where the hybrid loses.
+The working hypothesis is that BM25 wins keyword queries, dense wins paraphrases, the image signal helps visual queries, and the hybrid is best overall. That is a hypothesis to test. Whatever happens gets reported, including any query type where the hybrid loses.
+
+**Dev and test discipline.** Fusion weights, `k` and the image ranker's abstention floor are grid-searched on dev only. Every evaluation of the test split is appended to `results/test_runs.log` with the commit it ran at.
 
 **Component evaluations.**
-- Slide transitions: precision and recall at ±2 seconds against hand-annotated lectures, compared with PySceneDetect. Thresholds are tuned on one lecture and reported on another.
-- Speech recognition: word error rate on hand-corrected excerpts.
-- Failure analysis: a set of real misses, each with the query, the expected moment, what came back, and the cause.
+- Slide transitions: precision and recall at ±2 seconds against hand annotations, with thresholds tuned on one lecture and reported on another, against PySceneDetect and against ablations of the change score.
+- Speech recognition: pooled word error rate on hand-corrected excerpts, with and without the slide glossary prompt.
+- Failure analysis: for each miss, what came back and where each ranker had placed the answer.
 
-## Results
+```bash
+python eval/evaluate.py --split dev --tune
+```
 
-Not yet available.
+```bash
+python eval/evaluate.py --split test --tuned results/dev/tuned.json --latency
+```
+
+### Results
+
+**Not yet available.** This section will hold the ablation table, the per-type chart, latency, the component results and the failure analysis, from measured runs only.
+
+<details>
+<summary>Pipeline check on the synthetic demo lectures (not a benchmark)</summary>
+
+These numbers come from the two generated lectures: clean rendered slides, a synthetic voice, 3 minutes of video, 13 moments. They show that every stage and every evaluation script works. They say nothing about quality on real lectures, where slides are dense, audio is noisy and the library is a hundred times larger.
+
+| Check | Outcome |
+|---|---|
+| Slide transitions found (±1 s) | 11 of 11, no spurious cuts; the two bullet reveals correctly not reported |
+| Same, plain mean absolute difference | 2 spurious cuts, both on the bullet reveals |
+| Same, PySceneDetect `ContentDetector` defaults | 1 of 11 found |
+| Word error rate, no prompt | 1.54% |
+| Word error rate, slide glossary prompt | 0.66% (the gain here is spelling convention: the slides say "generalisation") |
+| Query latency on an Apple M4 CPU, hybrid, encoders included | p50 98 ms, p95 103 ms |
+
+Retrieval metrics are omitted on purpose: with 13 moments nearly everything is in the top 5.
+
+</details>
 
 ---
 
 ## Data and licensing
 
-- **Public demo.** Built on [MIT OpenCourseWare](https://ocw.mit.edu) lectures. OCW's default licence is CC BY-NC-SA, though individual courses can differ, so the licence is checked per course. Derived transcripts and index files are released under the same licence, for non-commercial use, with credit to OCW and the lecturers.
-- **Your own lectures.** The CLI indexes recordings locally. University recordings and slides belong to the institution and its lecturers, so they are for personal study only and are never uploaded, hosted, or committed to this repository.
+- **Public demo.** To be built on [MIT OpenCourseWare](https://ocw.mit.edu) lectures. OCW's default licence is CC BY-NC-SA, though individual courses can differ, so the licence is checked per course and recorded per lecture in `config/lectures.csv`. Derived transcripts, slide text and thumbnails are shared under the same licence, for non-commercial use, with credit to OCW and the lecturers. `lecturelens push` generates the attribution card from the index itself.
+- **Your own lectures.** Indexed locally, for personal study, and never uploaded, hosted or committed here. `.gitignore` excludes video, audio, work directories and indexes.
+- **This repository** contains code only. No lecture content is included.
 
 ## Related work
 
@@ -160,17 +267,70 @@ Lecture search already exists. What LectureLens adds is an **open, measured, mul
 
 ---
 
+## Repository layout
+
+```
+lecturelens/
+  ingest.py       ffmpeg: audio, detection frames, keyframe stills
+  slides.py       slide segmentation
+  ocr.py          PP-OCRv5, reading order, fragment joining
+  asr.py          faster-whisper, word timestamps, jargon glossary
+  moments.py      windowing and word alignment
+  embed.py        Qwen3-Embedding and SigLIP 2
+  index.py        the on-disk index format
+  pipeline.py     staged, cached, incremental indexing
+  search.py       rankers, RRF, dedupe, explanations
+  rerank.py       optional cross-encoder
+  metrics.py      relevance, Recall@k, MRR, transition matching, WER
+  evaluation.py   ablation systems, tuning, reports
+  publish.py      Hugging Face push / pull, dataset card
+  demo.py         synthetic lectures with ground truth
+  cli.py
+eval/
+  README.md               annotation formats and protocol
+  evaluate.py             retrieval benchmark
+  eval_transitions.py     slide transition precision / recall
+  eval_asr.py             word error rate
+config/
+  lectures.csv            catalogue: title, course, source, licence, link template
+  masks.yaml              per-lecture regions to ignore, and detector overrides
+notebooks/
+  build_index_kaggle.ipynb   build and publish the index on a free GPU
+tests/                    unit tests, plus an end-to-end test with the real models
+```
+
+## Development
+
+```bash
+uv sync --extra eval
+```
+
+```bash
+uv run pytest
+```
+
+```bash
+uv run ruff check . && uv run ruff format --check .
+```
+
+The unit tests replace the four models with deterministic stand-ins and synthesise their own video, so they need `ffmpeg` but no weights and finish in seconds. To run the real models end to end:
+
+```bash
+uv sync --extra index --extra eval && uv run pytest -m models
+```
+
+**macOS note.** If the repository lives in an iCloud-synced folder (Desktop or Documents), macOS marks dot-folders such as `.venv` as hidden, and Python 3.12 ignores the hidden file that makes an editable install importable. The symptom is `ModuleNotFoundError: No module named 'lecturelens'` from `uv run lecturelens`. Two ways round it: run the module form from the repository root, `uv run python -m lecturelens …`, which needs no install; or add `export UV_NO_EDITABLE=1` to your shell profile so that uv installs the package as ordinary files (it must be set for every uv command, because a later `uv run` without it switches back).
+
 ## Roadmap
 
-- [ ] Ingest: audio and frame extraction
-- [ ] Slide-change detection, keyframes, segment merging
-- [ ] Speech recognition with word timestamps
-- [ ] OCR on keyframes
-- [ ] Moment construction and alignment
-- [ ] Text and image embeddings, saved index
-- [ ] BM25, dense and image retrieval with rank fusion
-- [ ] CLI: `index`, `search`, `serve`
-- [ ] Evaluation harness, ablations and failure analysis
+- [x] Ingest, slide segmentation, OCR, speech recognition, moments
+- [x] Embeddings, index format, resumable pipeline
+- [x] BM25, dense and image retrieval with rank fusion; optional reranker
+- [x] CLI and Hugging Face publishing
+- [x] Evaluation harness, tuning, failure reports
+- [x] Kaggle notebook for indexing on a GPU
+- [ ] Choose an open-licensed course, index it, tune slide thresholds on real footage
+- [ ] Annotate transitions, ASR excerpts and 60 queries; run the benchmark; fill in Results
 - [ ] Web demo
 
 ## References
@@ -178,7 +338,9 @@ Lecture search already exists. What LectureLens adds is an **open, measured, mul
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 - [Qwen3 Embedding and Reranker](https://arxiv.org/abs/2506.05176)
 - [SigLIP 2](https://arxiv.org/abs/2502.14786)
-- [PaddleOCR (PP-OCRv5)](https://www.paddleocr.ai/latest/en/update/update.html)
+- [PaddleOCR (PP-OCRv5)](https://www.paddleocr.ai/latest/en/update/update.html), [RapidOCR](https://github.com/RapidAI/RapidOCR)
+- [bm25s](https://github.com/xhluca/bm25s)
+- [Reciprocal Rank Fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) (Cormack, Clarke and Büttcher, SIGIR 2009)
 - [PySceneDetect](https://github.com/Breakthrough/PySceneDetect)
 - [SliTraNet: slide transition detection](https://arxiv.org/abs/2202.03540)
 - [MIT OpenCourseWare terms](https://ocw.mit.edu/pages/get-started)
