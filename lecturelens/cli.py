@@ -5,6 +5,8 @@
     lecturelens search "why hold out data"    query it
     lecturelens info                          what is in the index
     lecturelens slides lec01.mp4              run slide detection alone, to tune masks
+    lecturelens push   user/my-index          publish an index as a Hugging Face dataset
+    lecturelens pull   user/my-index          fetch a published index
 
 Indexing your own recordings with this CLI keeps everything on your machine: nothing is
 uploaded, and the index links back to the local files.
@@ -374,6 +376,57 @@ def _contact_sheet(video: Path, segments, out: Path, columns: int = 5, width: in
         draw.text((x + 6, y + 2), text, fill=(20, 20, 20), font=font)
     out.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out, quality=88)
+
+
+# --------------------------------------------------------------------------------------
+# push / pull
+# --------------------------------------------------------------------------------------
+
+
+@app.command()
+def push(
+    repo_id: str = typer.Argument(
+        ..., help="Hugging Face dataset repository, e.g. user/lecturelens-index."
+    ),
+    index_dir: Path = typer.Option(Path("index"), "--index", "-i", help="Index directory."),
+    private: bool = typer.Option(False, help="Create the repository as private."),
+) -> None:
+    """Upload an index to a Hugging Face dataset repository, with an attribution card.
+
+    Only publish an index of lectures whose licence allows sharing derivatives. Uses the
+    token from `huggingface-cli login` or the HF_TOKEN environment variable.
+    """
+    setup_logging()
+    from lecturelens.publish import push_index
+
+    load_index(index_dir)  # fail early, with a clear message, if there is nothing to push
+    try:
+        url = push_index(index_dir, repo_id, private=private)
+    except Exception as err:  # the hub client raises many unrelated types
+        fail(f"upload failed: {err}")
+    console.print(f"[green]Pushed[/green] {index_dir} -> {url}")
+
+
+@app.command()
+def pull(
+    repo_id: str = typer.Argument(..., help="Hugging Face dataset repository holding an index."),
+    index_dir: Path = typer.Option(Path("index"), "--index", "-i", help="Where to put it."),
+) -> None:
+    """Download a published index, ready for `lecturelens search`."""
+    setup_logging()
+    from lecturelens.index import IndexError_
+    from lecturelens.publish import pull_index
+
+    try:
+        loaded = pull_index(repo_id, index_dir)
+    except IndexError_ as err:
+        fail(str(err))
+    except Exception as err:
+        fail(f"download failed: {err}")
+    console.print(
+        f"[green]Pulled[/green] {repo_id} -> {index_dir}: "
+        f"{len(loaded.lectures)} lectures, {len(loaded)} moments"
+    )
 
 
 # --------------------------------------------------------------------------------------
