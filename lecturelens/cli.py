@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
+
+from lecturelens.logs import configure_logging
 
 app = typer.Typer(
     name="lecturelens",
@@ -32,38 +33,12 @@ app = typer.Typer(
 console = Console()
 log = logging.getLogger("lecturelens")
 
-BADGE_STYLE = {"said": "green", "on slide": "blue", "visual": "magenta"}
-
 
 def setup_logging(verbose: bool = False) -> None:
-    """Our own progress at INFO; third-party libraries only when something is wrong."""
-    from rich.logging import RichHandler
+    configure_logging(console, verbose)
 
-    # Set before the libraries are imported: they read these once.
-    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-    os.environ.setdefault("HF_HUB_VERBOSITY", "error")
-    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(message)s",
-        handlers=[RichHandler(console=console, show_path=False, show_time=False, markup=False)],
-        force=True,
-    )
-    log.setLevel(logging.DEBUG if verbose else logging.INFO)
-    noisy = (
-        "httpx",
-        "httpcore",
-        "huggingface_hub",
-        "faster_whisper",
-        "RapidOCR",
-        "torch.distributed",
-    )
-    for name in noisy:
-        logging.getLogger(name).setLevel(logging.INFO if verbose else logging.ERROR)
-    # torch logs a note about stream redirection on every import on macOS, through its own
-    # handler, which resets levels; disabling the logger is the only thing that sticks.
-    logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").disabled = True
+
+BADGE_STYLE = {"said": "green", "on slide": "blue", "visual": "magenta"}
 
 
 def fail(message: str) -> None:

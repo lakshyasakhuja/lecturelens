@@ -83,4 +83,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]
-"lecturelens/cli.py" = ["B008"] # typer.Option(...) in argument defaults is the documented pattern
+# typer.Option(...) in argument defaults is the documented pattern
+"lecturelens/cli.py" = ["B008"]
+"eval/*.py" = ["B008", "E402"] # E402: the scripts put the repo root on sys.path first

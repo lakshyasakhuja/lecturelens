@@ -101,14 +101,29 @@ def probe(video: str | Path) -> VideoInfo:
     )
 
 
-def extract_audio(video: str | Path, out_wav: str | Path, sample_rate: int = 16_000) -> Path:
-    """Write the audio track as mono 16-bit PCM at ``sample_rate`` Hz."""
+def extract_audio(
+    video: str | Path,
+    out_wav: str | Path,
+    sample_rate: int = 16_000,
+    start: float | None = None,
+    duration: float | None = None,
+) -> Path:
+    """Write the audio track as mono 16-bit PCM at ``sample_rate`` Hz.
+
+    ``start`` and ``duration`` (seconds) cut out an excerpt instead of the whole track.
+    """
     out_wav = Path(out_wav)
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_wav.with_suffix(".partial.wav")
+    cut = []
+    if start is not None:
+        cut += ["-ss", f"{max(0.0, start):.3f}"]
+    if duration is not None:
+        cut += ["-t", f"{duration:.3f}"]
     _run(
         [
-            _binary("ffmpeg"), "-y", "-v", "error",
+            _binary("ffmpeg"), "-y", "-v", "error", "-nostdin",
+            *cut,
             "-i", str(video),
             "-vn", "-ac", "1", "-ar", str(sample_rate), "-c:a", "pcm_s16le",
             str(tmp),

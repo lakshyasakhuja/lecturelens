@@ -40,6 +40,13 @@ def test_extract_audio_is_16khz_mono_pcm(lecture_video, tmp_path):
     assert not list(wav_path.parent.glob("*.partial.wav"))
 
 
+def test_extract_audio_can_cut_an_excerpt(lecture_video, tmp_path):
+    path, _, _ = lecture_video
+    clip = ingest.extract_audio(path, tmp_path / "clip.wav", start=10, duration=7.5)
+    with wave.open(str(clip), "rb") as wav:
+        assert wav.getnframes() / wav.getframerate() == pytest.approx(7.5, abs=0.05)
+
+
 def test_read_audio_returns_normalised_mono_samples(lecture_video):
     path, _, seconds = lecture_video
     samples = ingest.read_audio(path)

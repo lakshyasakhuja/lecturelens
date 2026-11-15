@@ -307,8 +307,13 @@ class Searcher:
             self._bm25[name] = retriever
         return self._bm25[name]
 
-    def scores(self, ranker: str, encoding: QueryEncoding) -> np.ndarray:
-        """One score per moment; ``-inf`` marks moments the ranker cannot retrieve at all."""
+    def scores(
+        self, ranker: str, encoding: QueryEncoding, image_min_prob: float | None = None
+    ) -> np.ndarray:
+        """One score per moment; ``-inf`` marks moments the ranker cannot retrieve at all.
+
+        ``image_min_prob`` overrides the configured abstention floor of the image ranker.
+        """
         n = len(self.index)
         if ranker in LEXICAL_FIELDS:
             if not encoding.terms or n == 0:
@@ -326,7 +331,7 @@ class Searcher:
             if encoding.image is None:
                 raise ValueError("query was not encoded for 'image'")
             similarity = (self.index.image @ encoding.image).astype(np.float64)
-            floor = self.config.image_min_prob
+            floor = self.config.image_min_prob if image_min_prob is None else image_min_prob
             if floor > 0 and self._image_scale is not None and self._image_bias is not None:
                 logit = self._image_scale * similarity + self._image_bias
                 similarity = np.where(logit >= np.log(floor / (1 - floor)), similarity, -np.inf)
@@ -339,10 +344,11 @@ class Searcher:
         encoding: QueryEncoding,
         mask: np.ndarray | None = None,
         depth: int | None = None,
+        image_min_prob: float | None = None,
     ) -> dict[int, int]:
         """``{row: rank}`` for the ranker's top ``depth`` moments. Equal scores share a rank."""
         depth = depth or self.config.depth
-        scores = self.scores(ranker, encoding)
+        scores = self.scores(ranker, encoding, image_min_prob)
         if mask is not None:
             scores = np.where(mask, scores, -np.inf)
         order = np.argsort(-scores, kind="stable")
@@ -401,14 +407,14 @@ class Searcher:
             encoding, rankers, weights, self.lecture_mask(lectures)
         )
         if rerank and order:
-            order, scores = self._rerank(query, order, scores)
+            order, scores = self.rerank(query, order, scores)
         kept = dedupe(order, self._lecture_ids, self._starts, self.config.dedupe_window_s, top_k)
         return [
             self._explain(position, row, scores[row], encoding, per_ranker)
             for position, row in enumerate(kept, start=1)
         ]
 
-    def _rerank(
+    def rerank(
         self, query: str, order: list[int], scores: dict[int, float]
     ) -> tuple[list[int], dict[int, float]]:
         """Rescore the head of the fused list with the cross-encoder; the tail is cut off."""
