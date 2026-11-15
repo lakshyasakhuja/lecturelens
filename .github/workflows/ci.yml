@@ -27,10 +27,11 @@ jobs:
         with:
           enable-cache: true
 
-      # Core dependencies plus the eval extra. No torch, no model downloads: the unit tests
-      # cover the logic (segmentation, alignment, fusion, metrics), not the networks.
+      # Core dependencies plus the eval and web extras. No torch, no model downloads: the
+      # unit tests cover the logic (segmentation, alignment, fusion, metrics, the API), not
+      # the networks.
       - name: Install dependencies
-        run: uv sync --python ${{ matrix.python-version }} --extra eval
+        run: uv sync --python ${{ matrix.python-version }} --extra eval --extra web
 
       - name: Lint
         run: uv run ruff check . && uv run ruff format --check .

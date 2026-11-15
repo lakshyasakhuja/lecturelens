@@ -3,6 +3,7 @@
     lecturelens demo   ./demo                 generate two synthetic lectures to try things on
     lecturelens index  ./videos               build or update the search index
     lecturelens search "why hold out data"    query it
+    lecturelens serve                         open the search page in a browser
     lecturelens info                          what is in the index
     lecturelens slides lec01.mp4              run slide detection alone, to tune masks
     lecturelens push   user/my-index          publish an index as a Hugging Face dataset
@@ -377,6 +378,50 @@ def _contact_sheet(video: Path, segments, out: Path, columns: int = 5, width: in
         draw.text((x + 6, y + 2), text, fill=(20, 20, 20), font=font)
     out.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out, quality=88)
+
+
+# --------------------------------------------------------------------------------------
+# serve
+# --------------------------------------------------------------------------------------
+
+
+@app.command()
+def serve(
+    index_dir: Path = typer.Option(Path("index"), "--index", "-i", help="Index directory."),
+    videos: Path | None = typer.Option(
+        None, help="Directory of the recordings. Results then play the local file in the page."
+    ),
+    host: str = typer.Option(
+        "127.0.0.1", help="Address to listen on. 0.0.0.0 exposes it on the network."
+    ),
+    port: int = typer.Option(7860, help="Port to listen on."),
+    device: str = typer.Option("cpu", help="Device for the query encoders."),
+) -> None:
+    """Open the search page for an index in your browser.
+
+    Without --videos, results link to wherever the catalogue says each lecture lives. With
+    it, they play your local recordings, and nothing leaves your machine.
+    """
+    setup_logging()
+    try:
+        import uvicorn
+
+        from lecturelens.web.server import create_app, load_benchmark, load_examples
+    except ImportError:
+        fail("the web app needs extra packages: run `uv sync --extra web --extra models`")
+
+    loaded = load_index(index_dir)
+    if videos is not None and not videos.is_dir():
+        fail(f"video directory not found: {videos}")
+    web_app = create_app(
+        loaded,
+        videos_dir=videos,
+        examples=load_examples("config/examples.json"),
+        benchmark=load_benchmark("results/test/metrics.json"),
+        device=device,
+    )
+    console.print(f"LectureLens is at [bold]http://{host}:{port}[/bold]  (Ctrl+C to stop)")
+    uvicorn.run(web_app, host=host, port=port, log_level="warning")
 
 
 # --------------------------------------------------------------------------------------
