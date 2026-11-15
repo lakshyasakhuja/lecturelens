@@ -257,13 +257,17 @@ def create_app(
         if unknown:
             raise HTTPException(status_code=400, detail=f"Unknown lecture: {', '.join(unknown)}")
 
-        started = time.perf_counter()
+        was_ready = ready.is_set()
         with lock:
+            # Timed inside the lock: the figure is the search itself, not time spent queued
+            # behind another query or behind the models loading.
+            started = time.perf_counter()
             results = searcher.search(query, top_k=k, lectures=lecture or None)
-        took_ms = (time.perf_counter() - started) * 1000.0
+            took_ms = (time.perf_counter() - started) * 1000.0
         return {
             "query": query,
             "took_ms": round(took_ms, 1),
+            "warm": was_ready,
             "count": len(results),
             "results": [serialise(result) for result in results],
         }

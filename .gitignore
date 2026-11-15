@@ -28,7 +28,8 @@ hf_cache/
 # Notebooks
 .ipynb_checkpoints/
 
-# OS and editors
+# OS, editors and local assistant tooling
+.claude/
 .DS_Store
 .idea/
 .vscode/

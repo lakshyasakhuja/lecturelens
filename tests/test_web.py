@@ -102,6 +102,7 @@ def test_search_returns_explained_results(client):
     assert body["query"] == "chain rule"  # whitespace normalised
     assert body["count"] == len(body["results"]) >= 1
     assert body["took_ms"] >= 0
+    assert body["warm"] is True  # the models were loaded before this query arrived
     top = body["results"][0]
     assert top["moment_id"] == "lec02:0006"
     assert top["lecture_title"] == "Neural networks"
@@ -244,3 +245,54 @@ def test_examples_file(tmp_path):
 )
 def test_youtube_id(template, expected):
     assert youtube_id(Lecture("x", "X", video_link_template=template)) == expected
+
+
+# ---- the static frontend ---------------------------------------------------------------------
+
+
+def test_frontend_obeys_its_own_content_security_policy():
+    """The policy forbids inline scripts and inline styles, so the page must use neither."""
+    import re
+
+    from lecturelens.web.server import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    assert not re.search(r"<script(?![^>]*\bsrc=)[^>]*>", html), "inline <script> would be blocked"
+    assert "<style" not in html, "inline <style> would be blocked"
+    assert not re.search(r"\sstyle=", html), "style attributes would be blocked"
+    assert not re.search(r"\son[a-z]+=", html), "inline event handlers would be blocked"
+
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "innerHTML" not in script and "insertAdjacentHTML" not in script
+    assert "eval(" not in script
+
+
+def test_every_local_asset_the_page_references_exists(client):
+    import re
+
+    from lecturelens.web.server import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    assets = set(re.findall(r'(?:href|src)="(/[^"#]+)"', html))
+    assert {"/styles.css", "/app.js", "/favicon.svg"} <= assets
+    for asset in assets:
+        response = client.get(asset)
+        assert response.status_code == 200, asset
+    assert "javascript" in client.get("/app.js").headers["content-type"]
+    assert client.get("/styles.css").headers["content-type"].startswith("text/css")
+    assert client.get("/favicon.svg").headers["content-type"].startswith("image/svg")
+
+
+def test_page_has_the_hooks_the_script_fills_in():
+    import re
+
+    from lecturelens.web.server import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    ids = set(re.findall(r'\sid="([^"]+)"', html))
+    wanted = set(re.findall(r'\$\("([^"]+)"\)', script))
+    assert wanted, "the script should look elements up by id"
+    assert wanted <= ids, (
+        f"ids used by the script but missing from the page: {sorted(wanted - ids)}"
+    )
