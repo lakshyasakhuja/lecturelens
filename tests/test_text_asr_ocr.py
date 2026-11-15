@@ -9,6 +9,7 @@ from lecturelens.asr import (
     iter_words,
     jargon_terms,
     load_segments,
+    merge_word_pieces,
     save_segments,
     words_between,
 )
@@ -62,6 +63,26 @@ def test_segments_round_trip_through_jsonl(tmp_path):
     save_segments(path, _segments())
     assert load_segments(path) == _segments()
     assert not list(path.parent.glob("*.partial"))
+
+
+def test_word_pieces_are_merged_into_whole_words():
+    pieces = [
+        (" This", 0.0, 0.2, 0.9),
+        (" held", 0.2, 0.5, 0.8),
+        ("-out", 0.5, 0.8, 0.6),  # no leading space: continues "held"
+        (" portion", 0.8, 1.2, 0.95),
+        (" ", 1.2, 1.2, 0.5),  # empty after stripping: dropped
+        (" isn", 1.3, 1.4, 0.9),
+        ("'t", 1.4, 1.5, 0.7),
+    ]
+    words = merge_word_pieces(pieces)
+    assert [w.text for w in words] == ["This", "held-out", "portion", "isn't"]
+    held_out = words[1]
+    assert (held_out.start, held_out.end) == (0.2, 0.8)
+    assert held_out.prob == 0.6  # the weaker piece decides
+    # A piece with no leading space at the very start has nothing to join.
+    assert [w.text for w in merge_word_pieces([("Hello", 0, 1, 1.0)])] == ["Hello"]
+    assert merge_word_pieces([]) == ()
 
 
 def test_iter_words_and_words_between():

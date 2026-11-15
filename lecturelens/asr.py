@@ -130,19 +130,33 @@ def transcribe(
     )
     segments = []
     for seg in raw_segments:  # a generator: decoding happens as we iterate
-        words = tuple(
-            Word(
-                text=w.word.strip(),
-                start=float(w.start),
-                end=float(w.end),
-                prob=float(w.probability),
-            )
-            for w in (seg.words or [])
-            if w.word.strip()
+        words = merge_word_pieces(
+            (w.word, float(w.start), float(w.end), float(w.probability)) for w in (seg.words or [])
         )
         if words:
             segments.append(AsrSegment(float(seg.start), float(seg.end), seg.text.strip(), words))
     return segments
+
+
+def merge_word_pieces(pieces: Iterable[tuple[str, float, float, float]]) -> tuple[Word, ...]:
+    """Join Whisper's word pieces into whitespace-delimited words.
+
+    Whisper marks the start of a new word with a leading space. A piece without one
+    continues the previous word: "held-out" arrives as ``" held"`` and ``"-out"``. Joining
+    them here means a word is always something a reader would call a word, and transcripts
+    rebuilt from words read ``held-out`` rather than ``held -out``.
+    """
+    words: list[Word] = []
+    for raw, start, end, prob in pieces:
+        text = raw.strip()
+        if not text:
+            continue
+        if words and not raw[:1].isspace():
+            last = words[-1]
+            words[-1] = Word(last.text + text, last.start, end, min(last.prob, prob))
+        else:
+            words.append(Word(text, start, end, prob))
+    return tuple(words)
 
 
 def save_segments(path: str | Path, segments: Iterable[AsrSegment]) -> None:
