@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from fakes import DIM, FakeImageEmbedder, FakeTextEmbedder, make_index
 
-from lecturelens.index import Index, IndexError_
+from lecturelens.index import Index, InvalidIndex
 from lecturelens.search import SearchConfig, Searcher
 
 
@@ -251,27 +251,27 @@ def test_index_round_trips_through_disk(tmp_path):
 
 
 def test_loading_a_missing_or_incompatible_index_fails_clearly(tmp_path):
-    with pytest.raises(IndexError_, match="no index at"):
+    with pytest.raises(InvalidIndex, match="no index at"):
         Index.load(tmp_path / "nowhere")
     make_index(tmp_path / "index")
     manifest = tmp_path / "index" / "manifest.json"
     manifest.write_text(manifest.read_text().replace('"format": 1', '"format": 99'))
-    with pytest.raises(IndexError_, match="format 99"):
+    with pytest.raises(InvalidIndex, match="format 99"):
         Index.load(tmp_path / "index")
 
 
 def test_validate_catches_inconsistent_pieces():
     index = make_index()
     index.vectors["speech"] = index.vectors["speech"][:-1]
-    with pytest.raises(IndexError_, match="speech has 7 rows"):
+    with pytest.raises(InvalidIndex, match="speech has 7 rows"):
         index.validate()
 
     index = make_index()
     index.moments.loc[0, "image_idx"] = 99
-    with pytest.raises(IndexError_, match="image_idx"):
+    with pytest.raises(InvalidIndex, match="image_idx"):
         index.validate()
 
     index = make_index()
     index.lectures.pop("lec02")
-    with pytest.raises(IndexError_, match="not in the catalogue"):
+    with pytest.raises(InvalidIndex, match="not in the catalogue"):
         index.validate()

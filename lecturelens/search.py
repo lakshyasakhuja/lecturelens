@@ -291,7 +291,7 @@ class Searcher:
     # ---- individual rankers ----------------------------------------------------------------
 
     def _lexical(self, name: str):
-        """BM25 over the ranker's fields, built on first use (milliseconds at this scale)."""
+        """BM25 over the ranker's fields, built on first use (about 0.5 s per 2,000 moments)."""
         if name not in self._bm25:
             import bm25s
 

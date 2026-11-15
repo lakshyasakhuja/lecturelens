@@ -55,11 +55,6 @@ def analyze(text: str, *, stemming: bool = True) -> list[str]:
     return terms
 
 
-def content_terms(texts: Iterable[str]) -> list[list[str]]:
-    """``analyze`` over a corpus."""
-    return [analyze(text) for text in texts]
-
-
 _WORD = re.compile(r"[A-Za-z0-9]+")
 
 

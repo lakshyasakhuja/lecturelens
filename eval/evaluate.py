@@ -41,7 +41,7 @@ from lecturelens.evaluation import (
     tune,
     tuned_system,
 )
-from lecturelens.index import Index, IndexError_
+from lecturelens.index import Index, InvalidIndex
 from lecturelens.logs import configure_logging
 from lecturelens.search import Searcher
 from lecturelens.utils import read_json, write_json
@@ -71,7 +71,7 @@ def main(
     try:
         index = Index.load(index_dir)
         queries = load_queries(queries_path, index)
-    except (IndexError_, QueryError, FileNotFoundError) as err:
+    except (InvalidIndex, QueryError, FileNotFoundError) as err:
         console.print(f"[red]error:[/red] {err}")
         raise typer.Exit(1) from err
     if split != "all":

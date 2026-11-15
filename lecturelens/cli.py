@@ -49,11 +49,11 @@ def fail(message: str) -> None:
 
 
 def load_index(path: Path):
-    from lecturelens.index import Index, IndexError_
+    from lecturelens.index import Index, InvalidIndex
 
     try:
         return Index.load(path)
-    except IndexError_ as err:
+    except InvalidIndex as err:
         fail(str(err))
 
 
@@ -414,12 +414,12 @@ def pull(
 ) -> None:
     """Download a published index, ready for `lecturelens search`."""
     setup_logging()
-    from lecturelens.index import IndexError_
+    from lecturelens.index import InvalidIndex
     from lecturelens.publish import pull_index
 
     try:
         loaded = pull_index(repo_id, index_dir)
-    except IndexError_ as err:
+    except InvalidIndex as err:
         fail(str(err))
     except Exception as err:
         fail(f"download failed: {err}")

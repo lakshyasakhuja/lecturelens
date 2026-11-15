@@ -16,10 +16,10 @@ keyframe, so image vectors are stored once per keyframe and each moment points a
 through ``image_idx``.
 
 There is no vector database. A library of a dozen lectures is a couple of thousand
-moments, and an exhaustive dot product over that is well under a millisecond. Lexical
-(BM25) structures are not stored either: they are rebuilt from ``moments.parquet`` at load
-time in milliseconds, which removes any chance of the stored index and the tokeniser in
-the code drifting apart.
+moments, and an exhaustive dot product over that takes a few hundredths of a millisecond.
+Lexical (BM25) structures are not stored either: they are rebuilt from ``moments.parquet``
+when the index loads, in about half a second for 2,000 moments, which removes any chance
+of the stored index and the tokeniser in the code drifting apart.
 
 The three text matrices exist so that the ablations can isolate each source (transcript
 only, slide only, both) and so that a result can say whether it matched what was said or
@@ -59,7 +59,7 @@ MOMENT_COLUMNS = (
 )
 
 
-class IndexError_(RuntimeError):
+class InvalidIndex(RuntimeError):
     """The index directory is missing, incomplete, or inconsistent."""
 
 
@@ -99,29 +99,29 @@ class Index:
         return path if path.is_file() else None
 
     def validate(self) -> None:
-        """Check that the pieces agree with each other. Raises ``IndexError_`` if not."""
+        """Check that the pieces agree with each other. Raises ``InvalidIndex`` if not."""
         n = len(self.moments)
         missing = [c for c in MOMENT_COLUMNS if c not in self.moments.columns]
         if missing:
-            raise IndexError_(f"moments table is missing column(s): {missing}")
+            raise InvalidIndex(f"moments table is missing column(s): {missing}")
         for name in TEXT_VECTORS:
             if name not in self.vectors:
-                raise IndexError_(f"missing vectors: {name}")
+                raise InvalidIndex(f"missing vectors: {name}")
             if len(self.vectors[name]) != n:
-                raise IndexError_(
+                raise InvalidIndex(
                     f"{name} has {len(self.vectors[name])} rows but there are {n} moments"
                 )
         if "image" not in self.vectors:
-            raise IndexError_("missing vectors: image")
+            raise InvalidIndex("missing vectors: image")
         if n:
             image_idx = self.moments["image_idx"].to_numpy()
             if image_idx.min() < 0 or image_idx.max() >= len(self.image):
-                raise IndexError_("image_idx points outside the image matrix")
+                raise InvalidIndex("image_idx points outside the image matrix")
         unknown = set(self.moments["lecture_id"]) - set(self.lectures)
         if unknown:
-            raise IndexError_(f"moments refer to lectures not in the catalogue: {sorted(unknown)}")
+            raise InvalidIndex(f"moments refer to lectures not in the catalogue: {sorted(unknown)}")
         if self.moments["moment_id"].duplicated().any():
-            raise IndexError_("duplicate moment ids")
+            raise InvalidIndex("duplicate moment ids")
 
     def save(self, root: str | Path) -> Path:
         """Write the index. ``manifest.json`` goes last: its presence means the index is whole."""
@@ -163,12 +163,12 @@ class Index:
         root = Path(root)
         manifest_path = root / "manifest.json"
         if not manifest_path.is_file():
-            raise IndexError_(
+            raise InvalidIndex(
                 f"no index at {root} (manifest.json not found). Build one with `lecturelens index`."
             )
         manifest = read_json(manifest_path)
         if manifest.get("format") != INDEX_FORMAT:
-            raise IndexError_(
+            raise InvalidIndex(
                 f"index format {manifest.get('format')} is not supported by this version "
                 f"(expected {INDEX_FORMAT}); rebuild the index"
             )

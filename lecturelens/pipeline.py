@@ -44,13 +44,7 @@ from lecturelens import asr, ingest, ocr
 from lecturelens.catalog import Lecture
 from lecturelens.embed import EmbedConfig, ImageEmbedder, TextEmbedder
 from lecturelens.index import Index
-from lecturelens.moments import (
-    MomentConfig,
-    Window,
-    build_moments,
-    moment_text,
-    plan_windows,
-)
+from lecturelens.moments import MomentConfig, build_moments, moment_text, plan_windows
 from lecturelens.slides import SlideConfig, SlideSegment, detect_slides, load_slide_config
 from lecturelens.utils import format_timestamp, read_json, write_json
 
@@ -387,11 +381,3 @@ class Indexer:
         )
         index.save(out_dir)
         return index
-
-
-def load_windows(work: str | Path, config: MomentConfig | None = None) -> list[Window]:
-    """Re-derive a lecture's windows from its stored segments (used by evaluation scripts)."""
-    segments = [
-        SlideSegment.from_dict(d) for d in read_json(Path(work) / "segments.json")["segments"]
-    ]
-    return plan_windows(segments, config)
