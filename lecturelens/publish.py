@@ -67,14 +67,14 @@ def dataset_card(
         "",
         "## Lectures and attribution",
         "",
-        "| Lecture | Title | Course | Licence | Source |",
-        "|---|---|---|---|---|",
+        "| Lecture | Title | Course | Instructors | Licence | Source |",
+        "|---|---|---|---|---|---|",
     ]
     for lecture in index.lectures.values():
         source = f"[link]({lecture.source_url})" if lecture.source_url else "-"
         lines.append(
             f"| `{lecture.lecture_id}` | {lecture.title} | {lecture.course or '-'} | "
-            f"{lecture.licence or 'not stated'} | {source} |"
+            f"{lecture.instructors or '-'} | {lecture.licence or 'not stated'} | {source} |"
         )
     lines += [
         "",

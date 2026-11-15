@@ -18,6 +18,7 @@ CATALOG_COLUMNS = (
     "lecture_id",
     "title",
     "course",
+    "instructors",
     "source_url",
     "licence",
     "duration_s",
@@ -38,6 +39,7 @@ class Lecture:
     lecture_id: str
     title: str
     course: str = ""
+    instructors: str = ""  # who to credit; Creative Commons licences require naming the authors
     source_url: str = ""
     licence: str = ""
     duration_s: float = 0.0
@@ -93,6 +95,7 @@ def load_catalog(path: str | Path) -> dict[str, Lecture]:
                 lecture_id=lecture_id,
                 title=(row.get("title") or "").strip() or lecture_id,
                 course=(row.get("course") or "").strip(),
+                instructors=(row.get("instructors") or "").strip(),
                 source_url=(row.get("source_url") or "").strip(),
                 licence=(row.get("licence") or "").strip(),
                 duration_s=duration,

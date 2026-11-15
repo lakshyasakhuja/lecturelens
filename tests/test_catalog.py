@@ -12,7 +12,7 @@ from lecturelens.catalog import (
 )
 from lecturelens.utils import format_timestamp, parse_timestamp
 
-HEADER = "lecture_id,title,course,source_url,licence,duration_s,video_link_template\n"
+HEADER = "lecture_id,title,course,instructors,source_url,licence,duration_s,video_link_template\n"
 
 
 def write_catalog(tmp_path, rows: str):
@@ -24,27 +24,36 @@ def write_catalog(tmp_path, rows: str):
 def test_load_catalog_and_link(tmp_path):
     path = write_catalog(
         tmp_path,
-        'lec01,"Intro, part 1",Course A,https://example.org/1,CC BY-NC-SA 4.0,3605.5,'
-        "https://video.example/watch?v=abc&t={seconds}s\n",
+        'lec01,"Intro, part 1",Course A,"Ada Example, Bo Sample",https://example.org/1,'
+        "CC BY-NC-SA 4.0,3605.5,https://video.example/watch?v=abc&t={seconds}s\n",
     )
     lecture = load_catalog(path)["lec01"]
     assert lecture.title == "Intro, part 1"
+    assert lecture.instructors == "Ada Example, Bo Sample"
     assert lecture.duration_s == 3605.5
     assert lecture.link_at(1421.9) == "https://video.example/watch?v=abc&t=1421s"
     assert lecture.link_at(-5) == "https://video.example/watch?v=abc&t=0s"
 
 
-def test_shipped_catalog_header_is_valid():
-    assert load_catalog("config/lectures.csv") == {}
+def test_shipped_catalog_is_valid_and_fully_attributed():
+    catalog = load_catalog("config/lectures.csv")
+    assert catalog, "the catalogue should list the lectures of the public demo"
+    for lecture in catalog.values():
+        # Everything a CC BY-NC-SA attribution needs: who, what, where from, which licence.
+        assert lecture.title and lecture.course and lecture.instructors
+        assert lecture.source_url.startswith("https://ocw.mit.edu/")
+        assert lecture.licence == "CC BY-NC-SA 4.0"
+        assert lecture.duration_s > 0
+        assert "{seconds}" in lecture.video_link_template
 
 
 @pytest.mark.parametrize(
     "rows, message",
     [
-        ("lec 01,T,,,,,\n", "may only contain"),
-        ("lec01,T,,,,,\nlec01,U,,,,,\n", "duplicate"),
-        ("lec01,T,,,,abc,\n", "not a number"),
-        ("lec01,T,,,,,https://video.example/watch\n", "must contain"),
+        ("lec 01,T,,,,,,\n", "may only contain"),
+        ("lec01,T,,,,,,\nlec01,U,,,,,,\n", "duplicate"),
+        ("lec01,T,,,,,abc,\n", "not a number"),
+        ("lec01,T,,,,,,https://video.example/watch\n", "must contain"),
     ],
 )
 def test_catalog_validation(tmp_path, rows, message):

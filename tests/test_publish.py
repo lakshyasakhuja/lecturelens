@@ -17,6 +17,7 @@ def licensed_index(root=None, licences=("CC BY-NC-SA 4.0", "CC BY-NC-SA 4.0")):
         index.lectures[lecture_id] = dataclasses.replace(
             lecture,
             course="6.036 Introduction to Machine Learning",
+            instructors="Prof. Ada Example",
             licence=licence,
             source_url=f"https://ocw.example.edu/{lecture_id}",
         )
@@ -48,7 +49,7 @@ def test_dataset_card_credits_every_lecture():
     assert "It does not contain the lecture videos" in card
     assert (
         "| `lec01` | Generalisation | 6.036 Introduction to Machine Learning | "
-        "CC BY-NC-SA 4.0 | [link](https://ocw.example.edu/lec01) |"
+        "Prof. Ada Example | CC BY-NC-SA 4.0 | [link](https://ocw.example.edu/lec01) |"
     ) in card
     assert "| `lec02` | Neural networks |" in card
     assert "`large-v3-turbo`" in card and "`Qwen/Qwen3-Embedding-0.6B`" in card
@@ -57,7 +58,7 @@ def test_dataset_card_credits_every_lecture():
 def test_dataset_card_says_so_when_a_licence_is_missing():
     card = dataset_card(make_index())
     assert "license: other" in card
-    assert "| not stated | - |" in card
+    assert "| - | not stated | - |" in card
 
 
 def _fake_hub(monkeypatch, calls):
