@@ -54,6 +54,11 @@ DENSE_VECTORS = {"dense": "text", "dense_speech": "speech", "dense_slide": "slid
 RANKERS = (*LEXICAL_FIELDS, *DENSE_VECTORS, "image")
 DEFAULT_RANKERS = ("bm25", "dense", "image")
 
+# Badges. A source (speech or slide) is named as a match when it contains at least this
+# share of the query's terms, and at least this fraction of what the other source contains.
+MIN_COVERAGE = 1 / 3
+COVERAGE_RATIO = 0.6
+
 
 @dataclass(frozen=True)
 class SearchConfig:
@@ -483,14 +488,20 @@ class Searcher:
     ) -> tuple[str, ...]:
         """Which signals matched: what was said, what was on the slide, what it looked like.
 
-        Lexical evidence comes first: a query term found in the transcript means "said", in
-        the slide text "on slide". A semantic match with no shared words is attributed to
-        whichever of the two text sources is closer to the query in embedding space.
+        Lexical evidence comes first, measured as *coverage*: the share of the query's terms
+        found in the transcript, and in the slide text. One shared word out of six is not a
+        match, so a source needs at least a third of the terms; and when one source covers
+        far more of the question than the other, only that one is named. A semantic match
+        with too few shared words is attributed to whichever source is closer to the query
+        in embedding space.
         """
         depth = self.config.badge_depth
         terms = set(encoding.terms)
-        said = bool(terms & set(analyze(transcript)))
-        on_slide = bool(terms & set(analyze(slide_text)))
+        speech_cover = len(terms & set(analyze(transcript))) / len(terms) if terms else 0.0
+        slide_cover = len(terms & set(analyze(slide_text))) / len(terms) if terms else 0.0
+        best = max(speech_cover, slide_cover)
+        said = speech_cover >= MIN_COVERAGE and speech_cover >= COVERAGE_RATIO * best
+        on_slide = slide_cover >= MIN_COVERAGE and slide_cover >= COVERAGE_RATIO * best
 
         dense_hit = any(signals.get(name, depth + 1) <= depth for name in DENSE_VECTORS)
         if not (said or on_slide) and dense_hit and encoding.dense is not None:

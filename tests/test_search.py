@@ -115,6 +115,34 @@ def test_visual_query_is_badged_visual(searcher):
     assert top.signals == {"image": 1}
 
 
+def test_badges_follow_how_much_of_the_question_each_source_covers(searcher):
+    # Row 1: slide "The validation set"; speech "we keep some data aside that the model is
+    # never fitted on". The question's words are all in the speech and none on the slide.
+    (said_only,) = [r for r in searcher.search("data the model is never fitted on") if r.row == 1]
+    assert said_only.badges[:1] == ("said",) and "on slide" not in said_only.badges
+
+    # All on the slide, none spoken.
+    (slide_only,) = [r for r in searcher.search("validation set", rankers=["bm25"]) if r.row == 1]
+    assert slide_only.badges == ("on slide",)
+
+    # Split evenly between the two: both are named.
+    (both,) = [
+        r for r in searcher.search("validation set data aside", rankers=["bm25"]) if r.row == 1
+    ]
+    assert both.badges == ("said", "on slide")
+
+    # One word in six is not a match: no lexical badge from a single stray term. The dense
+    # ranker did not run here, so there is nothing to attribute it to either.
+    stray = [
+        r
+        for r in searcher.search(
+            "gradient clipping momentum warmup schedules data", rankers=["bm25"]
+        )
+        if r.row == 1
+    ]
+    assert stray and stray[0].badges == ()
+
+
 def test_visual_badge_needs_a_real_match_not_just_a_top_rank(searcher):
     # "backpropagation" describes nothing visual. Some keyframe is still ranked first by the
     # image ranker (here all of them tie), but none is a probable match, so no badge.
