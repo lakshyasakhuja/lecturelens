@@ -31,12 +31,12 @@ $ lecturelens search "the student who memorises last year's exam answers"
 | Search: BM25 + dense + image, rank fusion, deduplication, explanations, optional reranker | Built. |
 | CLI, resumable and incremental indexing, publishing to Hugging Face | Built. |
 | Evaluation harness: retrieval ablations, slide transitions, word error rate | Built, and exercised end to end on synthetic lectures. |
-| Web app: search page, player, JSON API, container image | Built. `lecturelens serve` runs it on any index. |
+| Web app: search page, player, JSON API, container image, Hugging Face Space | Built. `lecturelens serve` runs it on any index. |
 | Course for the public demo | Chosen and indexed locally: five lectures of MIT 6.7960 Deep Learning (Fall 2024), 6.5 hours, 678 moments. |
 | **Benchmark results on real lectures** | **Not yet.** The queries, slide transitions and transcript excerpts still have to be annotated by hand. No numbers are claimed until then. |
-| Hosted demo | Not yet deployed. The image and the steps are in [deploy/](deploy/README.md). |
+| Hosted demo | Not yet deployed. `lecturelens deploy` puts it on a free Hugging Face Space (ZeroGPU); the steps are in [deploy/](deploy/README.md). |
 
-More than 240 unit tests run in CI on every push, with no model downloads. A further integration test (`pytest -m models`) runs the whole system with the real models on synthetic lectures.
+More than 260 unit tests run in CI on every push, with no model downloads. A further integration test (`pytest -m models`) runs the whole system with the real models on synthetic lectures.
 
 ---
 
@@ -105,9 +105,9 @@ This opens the search page at `http://127.0.0.1:7860`. Add `--videos <folder>` a
 - **Play** opens the lecture at that moment in a sheet, from YouTube's privacy-enhanced player or from a local file. The app hosts no video.
 - **The library, the pipeline and the benchmark** are described further down the page, with counts read from the index. The benchmark table appears only when a measured `metrics.json` exists; until then the page says so.
 
-It is a small FastAPI app with a hand-written frontend in plain HTML, CSS and JavaScript: no framework and no build step. The page is light throughout, with system type at large sizes, a translucent navigation bar and rounded tiles. It ships no fonts and no third-party scripts, and runs under a strict Content-Security-Policy.
+It is a small FastAPI app with a hand-written frontend in plain HTML, CSS and JavaScript: no framework and no build step. The page is light throughout, with system type at large sizes, a translucent navigation bar and rounded tiles. It ships no fonts, loads scripts and styles from its own origin only, and runs under a strict Content-Security-Policy.
 
-Running it in a container or on Hugging Face Spaces is covered in [deploy/README.md](deploy/README.md).
+The same app runs as a free Hugging Face Space, where the page gains a **Rerank on a GPU** switch: the ordinary results appear first, then the cross-encoder rescores them on a borrowed GPU and the order updates. Deploying it there, or in a container, is covered in [deploy/README.md](deploy/README.md).
 
 | Command | What it does |
 |---|---|
@@ -117,6 +117,7 @@ Running it in a container or on Hugging Face Spaces is covered in [deploy/README
 | `lecturelens info` | What an index contains and which models built it. |
 | `lecturelens slides <video> --sheet out.jpg` | Run slide detection alone and write a contact sheet of keyframes, to check masks and thresholds before indexing. |
 | `lecturelens push / pull <repo>` | Publish or fetch an index as a Hugging Face dataset, with an attribution card. |
+| `lecturelens deploy <space> --index-repo <repo>` | Create or update the Hugging Face Space that serves a published index. |
 | `lecturelens demo <dir>` | Generate the synthetic lectures. |
 
 ---
@@ -211,8 +212,9 @@ RRF(d) = sum over rankers of  weight / (60 + rank(d))
 | Reranker (optional) | Qwen3-Reranker-0.6B | Same family as the embedder |
 | Storage | Parquet and numpy arrays | See "No vector database" above |
 | Web app | FastAPI, plain HTML / CSS / JavaScript | Search needs no GPU, and a hand-written page gives full control of the design |
+| Hosting | Hugging Face Space on ZeroGPU, through Gradio's server mode | Free; Gradio supplies the server and the queue for the one GPU call, the page stays hand-written |
 
-The package is split along the offline/online line. `uv sync` alone installs the core (index loading, fusion, metrics) with no deep-learning framework; `--extra models` adds the query encoders, `--extra index` adds speech recognition and OCR, `--extra web` adds the web app, `--extra eval` adds the evaluation tools.
+The package is split along the offline/online line. `uv sync` alone installs the core (index loading, fusion, metrics) with no deep-learning framework; `--extra models` adds the query encoders, `--extra index` adds speech recognition and OCR, `--extra web` adds the web app, `--extra space` adds what the Hugging Face Space runs on, `--extra eval` adds the evaluation tools.
 
 ### What it costs to run
 
@@ -334,6 +336,7 @@ lecturelens/
   publish.py      Hugging Face push / pull, dataset card
   demo.py         synthetic lectures with ground truth
   web/server.py   the JSON API and static file serving
+  web/space.py    the same app on Gradio's server, with the reranker on ZeroGPU
   web/static/     the frontend: index.html, styles.css, app.js
   cli.py
 eval/
@@ -345,7 +348,8 @@ config/
   lectures.csv            catalogue: title, course, instructors, source, licence, link template
   masks.yaml              per-lecture regions to ignore, and detector overrides
   examples.json           example questions shown under the search box
-deploy/                   running the web app in a container and on Hugging Face Spaces
+deploy/                   running the web app on Hugging Face Spaces and in a container
+  space/                  the Space's entry point, requirements and metadata
 Dockerfile
 notebooks/
   build_index_kaggle.ipynb   build and publish the index on a free GPU
