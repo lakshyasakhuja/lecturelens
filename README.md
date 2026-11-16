@@ -6,6 +6,12 @@ Semantic search for lecture recordings. Ask a question in plain English, such as
 
 Each result is ranked using three signals: what was **said**, what text was **on the slide**, and what the slide **looked like**.
 
+![The LectureLens web app showing results for a question](docs/screenshot.jpg)
+
+<sub>The web app, here searching the two synthetic demo lectures that `lecturelens demo` generates.</sub>
+
+The same search from the command line:
+
 ```console
 $ lecturelens search "the student who memorises last year's exam answers"
 
@@ -25,10 +31,12 @@ $ lecturelens search "the student who memorises last year's exam answers"
 | Search: BM25 + dense + image, rank fusion, deduplication, explanations, optional reranker | Built. |
 | CLI, resumable and incremental indexing, publishing to Hugging Face | Built. |
 | Evaluation harness: retrieval ablations, slide transitions, word error rate | Built, and exercised end to end on synthetic lectures. |
-| **Benchmark results on real lectures** | **Not yet.** Needs a course to be indexed and queries to be annotated. No numbers are claimed until then. |
-| Web demo | Not yet. |
+| Web app: search page, player, JSON API, container image | Built. `lecturelens serve` runs it on any index. |
+| Course for the public demo | Chosen and indexed locally: five lectures of MIT 6.7960 Deep Learning (Fall 2024), 6.5 hours, 678 moments. |
+| **Benchmark results on real lectures** | **Not yet.** The queries, slide transitions and transcript excerpts still have to be annotated by hand. No numbers are claimed until then. |
+| Hosted demo | Not yet deployed. The image and the steps are in [deploy/](deploy/README.md). |
 
-More than 200 unit tests run in CI on every push, with no model downloads. A further integration test (`pytest -m models`) runs the whole system with the real models on synthetic lectures.
+More than 240 unit tests run in CI on every push, with no model downloads. A further integration test (`pytest -m models`) runs the whole system with the real models on synthetic lectures.
 
 ---
 
@@ -80,9 +88,31 @@ uv run lecturelens search "what is the kernel trick" --index ~/lectures/comp5318
 
 University recordings and slides belong to the institution and its lecturers. Index them for personal study only; do not publish the index.
 
+## The web app
+
+```bash
+uv sync --extra index --extra web
+```
+
+```bash
+uv run lecturelens serve --index index
+```
+
+This opens the search page at `http://127.0.0.1:7860`. Add `--videos <folder>` and results play your local recordings inside the page instead of linking out.
+
+- **Search** in plain English, across all lectures or one. The first example question runs on load, so the page shows real results straight away.
+- **Results** are tiles: the best answer across the full width, the rest in a grid. Each shows its slide, the words that matched picked out of what was said, badges for the signals that matched, and the rank each signal gave it.
+- **Play** opens the lecture at that moment in a sheet, from YouTube's privacy-enhanced player or from a local file. The app hosts no video.
+- **The library, the pipeline and the benchmark** are described further down the page, with counts read from the index. The benchmark table appears only when a measured `metrics.json` exists; until then the page says so.
+
+It is a small FastAPI app with a hand-written frontend in plain HTML, CSS and JavaScript: no framework and no build step. The page is light throughout, with system type at large sizes, a translucent navigation bar and rounded tiles. It ships no fonts and no third-party scripts, and runs under a strict Content-Security-Policy.
+
+Running it in a container or on Hugging Face Spaces is covered in [deploy/README.md](deploy/README.md).
+
 | Command | What it does |
 |---|---|
 | `lecturelens index <videos>` | Build or update an index. Cached per stage, so it resumes after an interruption and only processes new lectures. |
+| `lecturelens serve` | The web app, for any index. |
 | `lecturelens search "<query>"` | Top moments with timestamps, snippets, badges and links. `--lecture` to filter, `--rerank` for the cross-encoder, `--json` for scripts. |
 | `lecturelens info` | What an index contains and which models built it. |
 | `lecturelens slides <video> --sheet out.jpg` | Run slide detection alone and write a contact sheet of keyframes, to check masks and thresholds before indexing. |
@@ -138,6 +168,8 @@ These are the decisions that are not obvious from the diagrams. Each one is cove
 
 **Added content is not replaced content.** Mean absolute pixel difference cannot tell three bullet points appearing from one sparse slide replacing another: both move about the same number of pixels. The sign of the change can. A build only adds ink, so every changed pixel moves the same way; a new slide removes old text and draws new text, so pixels move both ways. The detector splits a change into a balanced part and a one-sided part and counts the one-sided part at a quarter weight. On synthetic slides no single threshold on plain difference gets both cases right; this does ([test](tests/test_slides.py)).
 
+**Very short segments are folded into their neighbours.** A slide that animates changes every few seconds, and each step that replaces content is a segment. One shorter than 10 seconds joins whichever neighbouring slide its keyframe resembles more. On the five real lectures this removes about ten fragments per lecture and leaves the real slide changes alone.
+
 **The keyframe is the last quiet frame of a segment**, because an animated slide is only complete at the end. OCR and the image encoder read it at the video's native resolution, not from the 160x90 detection frame.
 
 **Whisper is prompted with the slides' own vocabulary.** Distinctive terms from the OCR (names, long words, tokens like `L2` and `k-fold`) are passed as hotwords. They are phrased as a sentence, `Glossary: a, b, c.`, because Whisper imitates the style of its prompt: given a bare comma-separated list it stops writing full stops.
@@ -153,6 +185,8 @@ RRF(d) = sum over rankers of  weight / (60 + rank(d))
 **Ties share a rank.** Windows of one long slide share a keyframe and so have identical image scores. Ranked 1, 2, 3, … they would fill the image ranking and push every other slide out. They all take their keyframe's rank instead, and the text rankers choose between them.
 
 **Results are landing points.** Two hits in one lecture that start within 20 seconds of each other would drop the student in the same place, so only the better one is kept.
+
+**Badges follow coverage, not a single shared word.** "Said" and "on slide" are shown when that source contains at least a third of the question's terms, and most of what the other source contains. On real lectures a one-word rule put both badges on nearly every result.
 
 **A "visual" badge needs evidence.** Some keyframe is always ranked first by the image ranker, even for a query that describes nothing visual. SigLIP is trained with a sigmoid loss, so its similarity converts to a match probability; the badge is shown only when that probability clears a threshold.
 
@@ -176,8 +210,22 @@ RRF(d) = sum over rankers of  weight / (60 + rank(d))
 | Sparse retrieval | `bm25s`, Snowball stemming | Fast BM25 in numpy |
 | Reranker (optional) | Qwen3-Reranker-0.6B | Same family as the embedder |
 | Storage | Parquet and numpy arrays | See "No vector database" above |
+| Web app | FastAPI, plain HTML / CSS / JavaScript | Search needs no GPU, and a hand-written page gives full control of the design |
 
-The package is split along the offline/online line. `uv sync` alone installs the core (index loading, fusion, metrics) with no deep-learning framework; `--extra models` adds the query encoders, `--extra index` adds speech recognition and OCR, `--extra eval` adds the evaluation tools.
+The package is split along the offline/online line. `uv sync` alone installs the core (index loading, fusion, metrics) with no deep-learning framework; `--extra models` adds the query encoders, `--extra index` adds speech recognition and OCR, `--extra web` adds the web app, `--extra eval` adds the evaluation tools.
+
+### What it costs to run
+
+Measured on an Apple M4 laptop (10 cores, 16 GB, no discrete GPU) on the five MIT 6.7960 lectures. These are system measurements, not retrieval results.
+
+| | Measured |
+|---|---|
+| Indexing an 84-minute lecture | 12 minutes: speech recognition 9 min 17 s, OCR of 123 slides 1 min 43 s, embeddings 51 s, slide detection and keyframes 14 s |
+| Speech recognition speed | About 9x real time on the Apple GPU, 4.4x on the CPU |
+| The index | 678 moments and 521 slide keyframes for 6.5 hours of video; 14 MB on disk, 9 MB of it thumbnails |
+| A query, end to end, on the CPU | 91 ms at the median, 113 ms at the 95th percentile (16 queries, both encoders included) |
+| The web app in a container | Ready 36 s after start; about 4 GB of memory |
+| Resuming an interrupted run | Four finished lectures were skipped in under a second; only the unfinished stage of the fifth ran again |
 
 ---
 
@@ -253,9 +301,9 @@ Retrieval metrics are omitted on purpose: with 13 moments nearly everything is i
 
 ## Data and licensing
 
-- **Public demo.** To be built on [MIT OpenCourseWare](https://ocw.mit.edu) lectures. OCW's default licence is CC BY-NC-SA, though individual courses can differ, so the licence is checked per course and recorded per lecture in `config/lectures.csv`. Derived transcripts, slide text and thumbnails are shared under the same licence, for non-commercial use, with credit to OCW and the lecturers. `lecturelens push` generates the attribution card from the index itself.
+- **Public demo.** Built on five lectures of [MIT 6.7960 Deep Learning, Fall 2024](https://ocw.mit.edu/courses/6-7960-deep-learning-fall-2024/) by Phillip Isola, Sara Beery and Jeremy Bernstein, from MIT OpenCourseWare, licensed CC BY-NC-SA 4.0. Lectures 4, 6, 8, 9 and 12 were chosen because evenly spaced frames from the official files show typeset slides for 75 to 100 percent of each. The source page, licence and instructors of every lecture are recorded in `config/lectures.csv`. Derived transcripts, slide text and thumbnails are shared under the same licence, for non-commercial use, with that credit. `lecturelens push` generates the attribution card from the index itself. LectureLens is not affiliated with or endorsed by MIT.
 - **Your own lectures.** Indexed locally, for personal study, and never uploaded, hosted or committed here. `.gitignore` excludes video, audio, work directories and indexes.
-- **This repository** contains code only. No lecture content is included.
+- **This repository** contains code only. No lecture video, transcript or slide is included; the screenshot above shows the synthetic demo lectures.
 
 ## Related work
 
@@ -285,6 +333,8 @@ lecturelens/
   evaluation.py   ablation systems, tuning, reports
   publish.py      Hugging Face push / pull, dataset card
   demo.py         synthetic lectures with ground truth
+  web/server.py   the JSON API and static file serving
+  web/static/     the frontend: index.html, styles.css, app.js
   cli.py
 eval/
   README.md               annotation formats and protocol
@@ -292,8 +342,11 @@ eval/
   eval_transitions.py     slide transition precision / recall
   eval_asr.py             word error rate
 config/
-  lectures.csv            catalogue: title, course, source, licence, link template
+  lectures.csv            catalogue: title, course, instructors, source, licence, link template
   masks.yaml              per-lecture regions to ignore, and detector overrides
+  examples.json           example questions shown under the search box
+deploy/                   running the web app in a container and on Hugging Face Spaces
+Dockerfile
 notebooks/
   build_index_kaggle.ipynb   build and publish the index on a free GPU
 tests/                    unit tests, plus an end-to-end test with the real models
@@ -302,7 +355,7 @@ tests/                    unit tests, plus an end-to-end test with the real mode
 ## Development
 
 ```bash
-uv sync --extra eval
+uv sync --extra eval --extra web
 ```
 
 ```bash
@@ -329,9 +382,10 @@ uv sync --extra index --extra eval && uv run pytest -m models
 - [x] CLI and Hugging Face publishing
 - [x] Evaluation harness, tuning, failure reports
 - [x] Kaggle notebook for indexing on a GPU
-- [ ] Choose an open-licensed course, index it, tune slide thresholds on real footage
-- [ ] Annotate transitions, ASR excerpts and 60 queries; run the benchmark; fill in Results
-- [ ] Web demo
+- [x] Choose an open-licensed course and index it
+- [x] Web app and container image
+- [ ] Annotate transitions, ASR excerpts and 60 queries; tune slide thresholds; run the benchmark; fill in Results
+- [ ] Deploy the hosted demo
 
 ## References
 

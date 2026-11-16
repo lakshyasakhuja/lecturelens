@@ -454,9 +454,10 @@ class Searcher:
         signals = {name: ranks[row] for name, ranks in per_ranker.items() if row in ranks}
         badges = self._badges(row, encoding, signals, slide_text, transcript)
 
-        # Show the text that matched: the transcript unless only the slide did.
-        source = slide_text if ("on slide" in badges and "said" not in badges) else transcript
-        snippet, highlights = make_snippet(source or slide_text or transcript, encoding.terms)
+        # The snippet is what was said. The slide is shown as a picture next to it, and OCR of
+        # a slide full of equations does not read well; slide text is the fallback for a
+        # moment with no speech.
+        snippet, highlights = make_snippet(transcript or slide_text, encoding.terms)
         lecture = self.index.lectures.get(lecture_id)
         return Result(
             rank=position,

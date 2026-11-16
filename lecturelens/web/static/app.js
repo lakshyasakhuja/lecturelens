@@ -351,7 +351,6 @@
       frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(source.video_id)}?start=${start}&autoplay=1&rel=0`;
       frame.title = `${result.lecture_title}, from ${result.timestamp}`;
       frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
-      frame.allowFullscreen = true;
       frame.referrerPolicy = "strict-origin-when-cross-origin";
       playerFrame.append(frame);
     } else {

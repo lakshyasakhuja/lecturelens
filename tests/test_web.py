@@ -233,6 +233,43 @@ def test_examples_file(tmp_path):
     assert load_examples(None) == []
 
 
+def test_examples_for_lectures_that_are_not_in_the_index_are_dropped(tmp_path):
+    path = tmp_path / "examples.json"
+    path.write_text(
+        json.dumps(
+            [
+                {"query": "in this index", "type": "keyword", "lecture_id": "lec01"},
+                {
+                    "query": "from another course",
+                    "type": "keyword",
+                    "lecture_id": "mit6-7960-lec04",
+                },
+                {"query": "no lecture named", "type": "visual"},
+            ]
+        )
+    )
+    lectures = make_index().lectures
+    assert [e["query"] for e in load_examples(path, lectures)] == [
+        "in this index",
+        "no lecture named",
+    ]
+    # Without an index to check against, nothing is filtered.
+    assert len(load_examples(path)) == 3
+
+
+def test_shipped_examples_are_valid_and_name_catalogued_lectures():
+    from pathlib import Path
+
+    from lecturelens.catalog import load_catalog
+
+    catalog = load_catalog("config/lectures.csv")
+    raw = json.loads(Path("config/examples.json").read_text(encoding="utf-8"))
+    assert 4 <= len(raw) <= 8
+    assert {item["type"] for item in raw} == {"keyword", "paraphrase", "spoken", "visual"}
+    assert all(item["lecture_id"] in catalog for item in raw)
+    assert len(load_examples("config/examples.json", catalog)) == len(raw)
+
+
 @pytest.mark.parametrize(
     "template, expected",
     [

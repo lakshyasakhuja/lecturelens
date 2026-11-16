@@ -77,15 +77,24 @@ def find_local_videos(
     return found
 
 
-def load_examples(path: str | Path | None) -> list[dict[str, str]]:
-    """Example queries for the search box: ``[{"query": ..., "type": ...}, ...]``."""
+def load_examples(
+    path: str | Path | None, lectures: Mapping[str, Lecture] | None = None
+) -> list[dict[str, str]]:
+    """Example queries for the search box: ``[{"query": ..., "type": ...}, ...]``.
+
+    An example may name the lecture that answers it (``"lecture_id"``). Given the index's
+    lectures, examples for lectures that are not in it are dropped, so the questions
+    written for the public demo never appear over somebody's own recordings.
+    """
     if not path or not Path(path).is_file():
         return []
     examples = []
     for item in read_json(path):
         query = str(item.get("query", "")).strip()
-        if query:
-            examples.append({"query": query, "type": str(item.get("type", ""))})
+        lecture_id = item.get("lecture_id")
+        if not query or (lectures is not None and lecture_id and lecture_id not in lectures):
+            continue
+        examples.append({"query": query, "type": str(item.get("type", ""))})
     return examples
 
 
@@ -313,7 +322,9 @@ def create_app_from_env() -> FastAPI:
     return create_app(
         index,
         videos_dir=os.environ.get("LECTURELENS_VIDEOS") or None,
-        examples=load_examples(os.environ.get("LECTURELENS_EXAMPLES", "config/examples.json")),
+        examples=load_examples(
+            os.environ.get("LECTURELENS_EXAMPLES", "config/examples.json"), index.lectures
+        ),
         benchmark=load_benchmark(
             os.environ.get("LECTURELENS_BENCHMARK", "results/test/metrics.json")
         ),

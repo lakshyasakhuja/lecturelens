@@ -1,0 +1,32 @@
+[
+  {
+    "query": "why do we share weights across positions",
+    "type": "paraphrase",
+    "lecture_id": "mit6-7960-lec04"
+  },
+  {
+    "query": "double descent",
+    "type": "keyword",
+    "lecture_id": "mit6-7960-lec06"
+  },
+  {
+    "query": "the short story about rewriting Don Quixote word for word",
+    "type": "spoken",
+    "lecture_id": "mit6-7960-lec08"
+  },
+  {
+    "query": "the picture of birds with arrows classifying each patch",
+    "type": "visual",
+    "lecture_id": "mit6-7960-lec04"
+  },
+  {
+    "query": "how does a transformer know the order of the words",
+    "type": "paraphrase",
+    "lecture_id": "mit6-7960-lec08"
+  },
+  {
+    "query": "grid of feature visualisations for alexnet and vgg",
+    "type": "visual",
+    "lecture_id": "mit6-7960-lec04"
+  }
+]

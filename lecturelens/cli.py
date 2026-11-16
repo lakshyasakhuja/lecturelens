@@ -416,7 +416,7 @@ def serve(
     web_app = create_app(
         loaded,
         videos_dir=videos,
-        examples=load_examples("config/examples.json"),
+        examples=load_examples("config/examples.json", loaded.lectures),
         benchmark=load_benchmark("results/test/metrics.json"),
         device=device,
     )

@@ -101,11 +101,23 @@ def test_keyword_query_finds_the_moment_and_explains_it(searcher):
     assert [top.snippet[a:b] for a, b in top.highlights] == ["chain", "rule"]
 
 
-def test_slide_only_match_is_badged_on_slide_and_shows_slide_text(searcher):
+def test_slide_only_match_is_badged_on_slide_but_the_snippet_is_what_was_said(searcher):
     top = searcher.search("backpropagation")[0]
     assert top.moment_id == "lec02:0006"
     assert top.badges == ("on slide",)
+    # The word is only on the slide, so nothing in the spoken snippet is highlighted.
+    assert top.snippet == "the chain rule applied from the output back to the input"
+    assert top.highlights == ()
+    assert top.slide_text == "Backpropagation"
+
+
+def test_a_moment_with_no_speech_falls_back_to_its_slide_text():
+    index = make_index()
+    index.moments.loc[6, "transcript"] = ""
+    silent = Searcher(index, text_embedder=FakeTextEmbedder(), image_embedder=FakeImageEmbedder())
+    top = silent.search("backpropagation", rankers=["bm25"])[0]
     assert top.snippet == "Backpropagation"
+    assert [top.snippet[a:b] for a, b in top.highlights] == ["Backpropagation"]
 
 
 def test_visual_query_is_badged_visual(searcher):
