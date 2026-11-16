@@ -45,6 +45,13 @@ web = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
 ]
+# The Hugging Face Space: the web app on Gradio's server, which is what ZeroGPU runs.
+# `spaces` does nothing off ZeroGPU, so this also runs, and is tested, anywhere else.
+space = [
+    "lecturelens[web]",
+    "gradio>=6.32,<7",
+    "spaces>=0.52",
+]
 # Evaluation scripts: WER, charts, and the PySceneDetect baseline.
 eval = [
     "jiwer>=3",
