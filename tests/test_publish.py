@@ -5,10 +5,19 @@ from __future__ import annotations
 import dataclasses
 import sys
 import types
+from pathlib import Path
 
+import pytest
 from fakes import make_index
 
-from lecturelens.publish import dataset_card, hub_licence, pull_index, push_index
+from lecturelens.publish import (
+    dataset_card,
+    hub_licence,
+    pull_index,
+    push_index,
+    push_space,
+    stage_space,
+)
 
 
 def licensed_index(root=None, licences=("CC BY-NC-SA 4.0", "CC BY-NC-SA 4.0")):
@@ -72,7 +81,20 @@ def _fake_hub(monkeypatch, calls):
             calls.append(("create_repo", repo_id, kwargs))
 
         def upload_folder(self, **kwargs):
+            # The folder may be temporary, so note what is in it while it exists.
+            folder = Path(kwargs["folder_path"])
+            kwargs["files"] = sorted(
+                path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file()
+            )
             calls.append(("upload_folder", kwargs))
+
+        def repo_info(self, repo_id, **kwargs):
+            calls.append(("repo_info", repo_id, kwargs))
+            if repo_id.endswith("/missing"):
+                raise RuntimeError("404: no such repository")
+
+        def add_space_variable(self, repo_id, key, value):
+            calls.append(("add_space_variable", repo_id, key, value))
 
     def snapshot_download(**kwargs):
         calls.append(("snapshot_download", kwargs))
@@ -115,3 +137,76 @@ def test_pull_downloads_and_loads(tmp_path, monkeypatch):
     assert len(index) == 8
     assert calls[0][1]["repo_type"] == "dataset"
     assert calls[0][1]["repo_id"] == "someone/lectures-index"
+
+
+# ---- the Space ---------------------------------------------------------------------------------
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_staged_space_holds_the_app_and_nothing_it_should_not(tmp_path):
+    staged = stage_space(tmp_path / "space", ROOT)
+
+    files = {path.relative_to(staged).as_posix() for path in staged.rglob("*") if path.is_file()}
+    assert {"README.md", "app.py", "requirements.txt", "config/examples.json"} <= files
+    assert {
+        "lecturelens/__init__.py",
+        "lecturelens/web/space.py",
+        "lecturelens/web/static/index.html",
+        "lecturelens/web/static/vendor/gradio-client.js",
+    } <= files
+    assert (staged / "README.md").read_text().startswith("---\ntitle: LectureLens\n")
+    assert "sdk: gradio" in (staged / "README.md").read_text()
+
+    # No recordings, no index, no caches, and nothing binary: the Hub refuses binary files
+    # pushed as plain git objects, and none of this belongs in a public Space anyway.
+    media = {".mp4", ".mkv", ".mov", ".webm", ".wav", ".npy", ".parquet", ".jpg", ".png", ".pyc"}
+    assert not [name for name in files if Path(name).suffix.lower() in media]
+    assert not [name for name in files if "__pycache__" in name or "/." in f"/{name}"]
+    for name in files:
+        (staged / name).read_text(encoding="utf-8")  # raises if a file is not text
+
+
+def test_staging_needs_the_repository(tmp_path):
+    with pytest.raises(FileNotFoundError, match="root of the repository"):
+        stage_space(tmp_path / "space", tmp_path)
+
+
+def test_push_space_creates_a_zerogpu_gradio_space_and_points_it_at_the_index(monkeypatch):
+    calls = []
+    _fake_hub(monkeypatch, calls)
+
+    url = push_space("someone/lecturelens", "someone/lectures-index", root=ROOT, token="t0k3n")
+
+    assert url == "https://huggingface.co/spaces/someone/lecturelens"
+    names = [call[0] for call in calls]
+    assert names == ["init", "repo_info", "create_repo", "add_space_variable", "upload_folder"]
+    assert calls[1][1:] == ("someone/lectures-index", {"repo_type": "dataset"})
+    assert calls[2][1:] == (
+        "someone/lecturelens",
+        {
+            "repo_type": "space",
+            "space_sdk": "gradio",
+            "space_hardware": "zero-a10g",
+            "private": False,
+            "exist_ok": True,
+        },
+    )
+    assert calls[3][1:] == (
+        "someone/lecturelens",
+        "LECTURELENS_INDEX_REPO",
+        "someone/lectures-index",
+    )
+    upload = calls[4][1]
+    assert upload["repo_type"] == "space" and upload["repo_id"] == "someone/lecturelens"
+    assert {"app.py", "requirements.txt", "README.md", "lecturelens/web/space.py"} <= set(
+        upload["files"]
+    )
+
+
+def test_push_space_stops_before_creating_anything_if_the_index_is_not_published(monkeypatch):
+    calls = []
+    _fake_hub(monkeypatch, calls)
+    with pytest.raises(RuntimeError, match="no such repository"):
+        push_space("someone/lecturelens", "someone/missing", root=ROOT)
+    assert [call[0] for call in calls] == ["init", "repo_info"]

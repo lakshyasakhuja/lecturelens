@@ -475,6 +475,42 @@ def pull(
     )
 
 
+@app.command()
+def deploy(
+    repo_id: str = typer.Argument(
+        ..., help="Hugging Face Space to create or update, e.g. user/lecturelens."
+    ),
+    index_repo: str = typer.Option(
+        ..., "--index-repo", help="Dataset repository holding the index (see `lecturelens push`)."
+    ),
+    private: bool = typer.Option(False, help="Create the Space as private."),
+    hardware: str = typer.Option(
+        "zero-a10g", help="Hardware for a new Space. The default is ZeroGPU, which is free."
+    ),
+) -> None:
+    """Deploy the web app as a Hugging Face Space on ZeroGPU, serving a published index.
+
+    Run it from the root of the repository, after `lecturelens push`. It uploads the app's
+    source and nothing else: no video and no index. Uses the token from `hf auth login` or
+    the HF_TOKEN environment variable.
+    """
+    setup_logging()
+    from lecturelens.publish import push_space
+
+    try:
+        url = push_space(repo_id, index_repo, private=private, hardware=hardware)
+    except FileNotFoundError as err:
+        fail(str(err))
+    except Exception as err:  # the hub client raises many unrelated types
+        fail(
+            f"deployment failed: {err}\n"
+            "A free account can host two ZeroGPU Spaces, once its email is verified and it "
+            "is more than 30 days old."
+        )
+    console.print(f"[green]Deployed[/green] {url}")
+    console.print("It builds for a few minutes, then loads the models; watch the Logs tab there.")
+
+
 # --------------------------------------------------------------------------------------
 # demo
 # --------------------------------------------------------------------------------------

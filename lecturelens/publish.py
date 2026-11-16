@@ -11,6 +11,8 @@ to redistribute derivatives of; private recordings stay on your own machine.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from pathlib import Path
 
 from lecturelens.index import Index
@@ -139,3 +141,82 @@ def pull_index(repo_id: str, local_dir: str | Path, token: str | None = None) ->
         repo_id=repo_id, repo_type="dataset", local_dir=str(local_dir), token=token
     )
     return Index.load(path)
+
+
+# ---- the hosted demo ---------------------------------------------------------------------
+
+# What a Hugging Face Space built with the Gradio SDK reads from the root of its repository.
+SPACE_FILES = ("README.md", "app.py", "requirements.txt")
+# ZeroGPU, by the name the Hub's API knows it under.
+ZERO_GPU = "zero-a10g"
+
+
+def stage_space(dest: str | Path, root: str | Path = ".") -> Path:
+    """Assemble the files a Space runs from, in ``dest``. Returns ``dest``.
+
+    A Gradio Space does not install this package; it runs ``app.py`` beside a copy of it.
+    So the Space gets the package's source, the example questions, the measured benchmark
+    if there is one, and its own three files from ``deploy/space``. No video, no index and
+    nothing binary: the index is fetched from its dataset repository when the Space starts.
+    """
+    dest, root = Path(dest), Path(root)
+    source = root / "deploy" / "space"
+    missing = [name for name in SPACE_FILES if not (source / name).is_file()]
+    if missing:
+        raise FileNotFoundError(
+            f"{source} has no {', '.join(missing)}; run this from the root of the repository"
+        )
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        Path(__file__).parent,
+        dest / "lecturelens",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".*"),
+        dirs_exist_ok=True,
+    )
+    for name in SPACE_FILES:
+        shutil.copy2(source / name, dest / name)
+    for optional in ("config/examples.json", "results/test/metrics.json"):
+        if (root / optional).is_file():
+            (dest / optional).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(root / optional, dest / optional)
+    return dest
+
+
+def push_space(
+    repo_id: str,
+    index_repo: str,
+    root: str | Path = ".",
+    token: str | None = None,
+    private: bool = False,
+    hardware: str = ZERO_GPU,
+) -> str:
+    """Create or update the Hugging Face Space that serves ``index_repo``. Returns its URL.
+
+    The Space is created on ZeroGPU, which is the hardware a free account may use; an
+    existing Space keeps the hardware it has. The index must already be published
+    (``push_index``), and publicly: the Space is given its name, not a token to read it.
+    """
+    from huggingface_hub import HfApi
+
+    api = HfApi(token=token)
+    api.repo_info(index_repo, repo_type="dataset")  # fail now, not when the Space starts
+    api.create_repo(
+        repo_id,
+        repo_type="space",
+        space_sdk="gradio",
+        space_hardware=hardware,
+        private=private,
+        exist_ok=True,
+    )
+    api.add_space_variable(repo_id, "LECTURELENS_INDEX_REPO", index_repo)
+    with tempfile.TemporaryDirectory() as staging:
+        stage_space(staging, root)
+        api.upload_folder(
+            folder_path=staging,
+            repo_id=repo_id,
+            repo_type="space",
+            commit_message="Deploy LectureLens",
+            # Files removed from the package should not linger in the Space.
+            delete_patterns=["lecturelens/**", "config/**", "results/**"],
+        )
+    return f"https://huggingface.co/spaces/{repo_id}"
