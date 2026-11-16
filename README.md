@@ -34,7 +34,7 @@ $ lecturelens search "the student who memorises last year's exam answers"
 | Web app: search page, player, JSON API, container image, Hugging Face Space | Built. `lecturelens serve` runs it on any index. |
 | Course for the public demo | Chosen and indexed locally: five lectures of MIT 6.7960 Deep Learning (Fall 2024), 6.5 hours, 678 moments. |
 | **Benchmark results on real lectures** | **Not yet.** The queries, slide transitions and transcript excerpts still have to be annotated by hand. No numbers are claimed until then. |
-| Hosted demo | Not yet deployed. `lecturelens deploy` puts it on a free Hugging Face Space (ZeroGPU); the steps are in [deploy/](deploy/README.md). |
+| Hosted demo | **Live** at <https://lakshyasakhuja-lecturelens.hf.space>, a free Hugging Face Space on ZeroGPU, put there by `lecturelens deploy`. Search works; reranking on a GPU is switched off there because it fails on ZeroGPU ([what was found](deploy/README.md#what-the-first-deployment-showed)). |
 
 More than 260 unit tests run in CI on every push, with no model downloads. A further integration test (`pytest -m models`) runs the whole system with the real models on synthetic lectures.
 
@@ -107,7 +107,7 @@ This opens the search page at `http://127.0.0.1:7860`. Add `--videos <folder>` a
 
 It is a small FastAPI app with a hand-written frontend in plain HTML, CSS and JavaScript: no framework and no build step. The page is light throughout, with system type at large sizes, a translucent navigation bar and rounded tiles. It ships no fonts, loads scripts and styles from its own origin only, and runs under a strict Content-Security-Policy.
 
-The same app runs as a free Hugging Face Space, where the page gains a **Rerank on a GPU** switch: the ordinary results appear first, then the cross-encoder rescores them on a borrowed GPU and the order updates. Deploying it there, or in a container, is covered in [deploy/README.md](deploy/README.md).
+The same app runs as a free Hugging Face Space. The Space's app can also offer a **Rerank on a GPU** switch: the ordinary results appear first, then the cross-encoder rescores them on a borrowed GPU and the order updates. That works on a laptop and not yet on the Space, so it is switched off there. Deploying, in a Space or in a container, is covered in [deploy/README.md](deploy/README.md).
 
 | Command | What it does |
 |---|---|
@@ -212,7 +212,7 @@ RRF(d) = sum over rankers of  weight / (60 + rank(d))
 | Reranker (optional) | Qwen3-Reranker-0.6B | Same family as the embedder |
 | Storage | Parquet and numpy arrays | See "No vector database" above |
 | Web app | FastAPI, plain HTML / CSS / JavaScript | Search needs no GPU, and a hand-written page gives full control of the design |
-| Hosting | Hugging Face Space on ZeroGPU, through Gradio's server mode | Free; Gradio supplies the server and the queue for the one GPU call, the page stays hand-written |
+| Hosting | Hugging Face Space on ZeroGPU, through Gradio's server mode | Free; Gradio supplies the server, the page stays hand-written |
 
 The package is split along the offline/online line. `uv sync` alone installs the core (index loading, fusion, metrics) with no deep-learning framework; `--extra models` adds the query encoders, `--extra index` adds speech recognition and OCR, `--extra web` adds the web app, `--extra space` adds what the Hugging Face Space runs on, `--extra eval` adds the evaluation tools.
 
@@ -336,7 +336,7 @@ lecturelens/
   publish.py      Hugging Face push / pull, dataset card
   demo.py         synthetic lectures with ground truth
   web/server.py   the JSON API and static file serving
-  web/space.py    the same app on Gradio's server, with the reranker on ZeroGPU
+  web/space.py    the same app on Gradio's server, for a Hugging Face Space
   web/static/     the frontend: index.html, styles.css, app.js
   cli.py
 eval/
@@ -389,7 +389,8 @@ uv sync --extra index --extra eval && uv run pytest -m models
 - [x] Choose an open-licensed course and index it
 - [x] Web app and container image
 - [ ] Annotate transitions, ASR excerpts and 60 queries; tune slide thresholds; run the benchmark; fill in Results
-- [ ] Deploy the hosted demo
+- [x] Deploy the hosted demo
+- [ ] Make reranking work on the Space: run the query encoders in their own process
 
 ## References
 

@@ -16,6 +16,14 @@ JavaScript client, which is what carries the visitor's identity to ZeroGPU.
 Outside ZeroGPU, ``@spaces.GPU`` does nothing and the reranker runs on whatever device it
 is given, so the Space can be run and tested on a laptop.
 
+Reranking is off unless ``LECTURELENS_RERANK=1``, because on ZeroGPU it does not work yet.
+Measured on the deployed Space in November 2026 (torch 2.13.0, spaces 0.51.3): a GPU call
+succeeds until the Qwen3 text encoder has run one forward pass on the CPU in this process,
+and from then on every call fails in ZeroGPU's worker with "No CUDA GPUs are available".
+Loading the encoder, and loading and running SigLIP, do not have that effect. Searching
+needs that forward pass, so the two cannot share a process as things stand; see
+``deploy/README.md``.
+
 ``spaces`` has to be imported before anything initialises CUDA, so the Space's ``app.py``
 imports it first; the import here is second in line.
 """
@@ -54,6 +62,17 @@ def on_zero_gpu() -> bool:
     return os.environ.get("SPACES_ZERO_GPU", "").lower() in {"1", "t", "true"}
 
 
+def rerank_enabled() -> bool:
+    """Does the environment ask for reranking? ``LECTURELENS_RERANK=1`` turns it on."""
+    return os.environ.get("LECTURELENS_RERANK", "").lower() in {"1", "t", "true", "yes", "on"}
+
+
+@spaces.GPU(duration=1)
+def _gpu_placeholder() -> None:
+    """Never called. ZeroGPU will not start a Space that has no ``@spaces.GPU`` function,
+    and with reranking off the app would otherwise have none."""
+
+
 class GpuReranker:
     """What ``Searcher`` sees as its reranker: tokenise here, score inside ``@spaces.GPU``."""
 
@@ -76,6 +95,7 @@ def create_space(
     searcher: Searcher | None = None,
     *,
     reranker: Any | None = None,
+    rerank: bool = True,
     examples: Sequence[Mapping[str, str]] = (),
     benchmark: Mapping[str, Any] | None = None,
     device: str = "cpu",
@@ -85,7 +105,8 @@ def create_space(
 
     ``reranker`` is anything with ``score(query, documents)``. By default it is the
     cross-encoder, loaded now: ZeroGPU can only hand a model to a GPU later if the model
-    was placed on ``cuda`` while the app was starting.
+    was placed on ``cuda`` while the app was starting. With ``rerank=False`` no reranker is
+    loaded, the page shows no switch and the endpoint does not exist.
 
     Every model is loaded here, before the server starts, rather than in the background as
     ``create_app`` does. ZeroGPU patches PyTorch for the thread that imported ``spaces``,
@@ -95,12 +116,13 @@ def create_space(
     if on_zero_gpu():
         # There is no GPU outside a @spaces.GPU call, whatever torch.cuda.is_available says.
         device = "cpu"
-    if reranker is None:
+    if rerank and reranker is None:
         model = Reranker(device="cuda" if on_zero_gpu() else device).load()
         reranker = GpuReranker(model)
     if searcher is None:
         searcher = Searcher(index, device=device)
-    searcher.reranker = reranker
+    if rerank:
+        searcher.reranker = reranker
     if warm_up:
         searcher.warm_up()
 
@@ -115,8 +137,10 @@ def create_space(
         device=device,
         warm_up=False,
         app=server,
-        rerank=True,
+        rerank=rerank,
     )
+    if not rerank:
+        return server
     run_search = server.state.run_search
 
     # One call at a time: the queue is Gradio's, and so is the place a visitor waits in it.
@@ -136,7 +160,8 @@ def create_space_from_env() -> gradio.Server:
 
     It reads the same variables: ``LECTURELENS_INDEX``, ``LECTURELENS_INDEX_REPO``,
     ``LECTURELENS_EXAMPLES``, ``LECTURELENS_BENCHMARK`` and ``LECTURELENS_DEVICE`` (the
-    device of the query encoders, ``cpu`` unless set).
+    device of the query encoders, ``cpu`` unless set), and one more: ``LECTURELENS_RERANK``,
+    which turns reranking on when it is ``1``.
     """
     from lecturelens.logs import configure_logging
 
@@ -146,6 +171,7 @@ def create_space_from_env() -> gradio.Server:
     index = load_index_from_env()
     return create_space(
         index,
+        rerank=rerank_enabled(),
         examples=load_examples(
             os.environ.get("LECTURELENS_EXAMPLES", "config/examples.json"), index.lectures
         ),

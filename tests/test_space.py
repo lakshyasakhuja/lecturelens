@@ -17,7 +17,13 @@ from fakes import FakeImageEmbedder, FakeTextEmbedder, make_index
 from fastapi.testclient import TestClient
 
 from lecturelens.search import Searcher
-from lecturelens.web.space import GpuReranker, create_space, launch, on_zero_gpu
+from lecturelens.web.space import (
+    GpuReranker,
+    create_space,
+    launch,
+    on_zero_gpu,
+    rerank_enabled,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -62,6 +68,34 @@ def test_not_on_zero_gpu_here(monkeypatch):
     assert on_zero_gpu() is False
     monkeypatch.setenv("SPACES_ZERO_GPU", "true")
     assert on_zero_gpu() is True
+
+
+def test_reranking_is_off_unless_the_environment_asks(monkeypatch):
+    monkeypatch.delenv("LECTURELENS_RERANK", raising=False)
+    assert rerank_enabled() is False
+    monkeypatch.setenv("LECTURELENS_RERANK", "0")
+    assert rerank_enabled() is False
+    monkeypatch.setenv("LECTURELENS_RERANK", "1")
+    assert rerank_enabled() is True
+
+
+def test_a_space_without_reranking_loads_no_reranker_and_has_no_endpoint():
+    from gradio_client import Client
+
+    index = make_index()
+    searcher = Searcher(index, text_embedder=FakeTextEmbedder(), image_embedder=FakeImageEmbedder())
+    server = create_space(index, searcher, rerank=False, warm_up=False)
+    assert searcher.reranker is None, "nothing was loaded"
+    _, url, _ = launch(server, prevent_thread_lock=True, server_port=free_port(), quiet=True)
+    try:
+        client = TestClient(server)
+        assert "LectureLens" in client.get("/").text
+        assert client.get("/api/info").json()["rerank"] is False
+        assert client.get("/api/search", params={"q": "chain rule"}).json()["count"] >= 1
+        with pytest.raises(Exception):  # noqa: B017 -- gradio_client has no one error type
+            Client(url, verbose=False).predict(query="x", k=5, lectures=None, api_name="/rerank")
+    finally:
+        server.get_blocks().close()
 
 
 def test_the_space_serves_the_same_page_and_api():
