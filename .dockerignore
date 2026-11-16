@@ -1,0 +1,8 @@
+# Keep the build context to what the image needs: the package and its config.
+*
+!pyproject.toml
+!README.md
+!lecturelens/
+!config/
+**/__pycache__/
+**/*.pyc

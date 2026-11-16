@@ -421,7 +421,7 @@ def serve(
         device=device,
     )
     console.print(f"LectureLens is at [bold]http://{host}:{port}[/bold]  (Ctrl+C to stop)")
-    uvicorn.run(web_app, host=host, port=port, log_level="warning")
+    uvicorn.run(web_app, host=host, port=port, log_level="warning", access_log=False)
 
 
 # --------------------------------------------------------------------------------------
