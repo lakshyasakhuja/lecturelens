@@ -333,3 +333,110 @@ def test_page_has_the_hooks_the_script_fills_in():
     assert wanted <= ids, (
         f"ids used by the script but missing from the page: {sorted(wanted - ids)}"
     )
+
+
+# ---- reranking, and running on somebody else's application -----------------------------------
+
+
+class ReverseReranker:
+    """Scores documents so that the first-stage order comes back reversed."""
+
+    def __init__(self):
+        self.calls = []
+
+    def score(self, query, documents):
+        self.calls.append((query, list(documents)))
+        return [float(position) for position in range(len(documents))]
+
+
+def make_app(reranker=None, **options):
+    index = make_index()
+    searcher = Searcher(
+        index,
+        text_embedder=FakeTextEmbedder(),
+        image_embedder=FakeImageEmbedder(),
+        reranker=reranker,
+    )
+    return create_app(index, searcher, warm_up=False, **options)
+
+
+def test_the_json_api_does_not_offer_reranking_unless_the_host_does():
+    assert TestClient(make_app()).get("/api/info").json()["rerank"] is False
+    assert TestClient(make_app(rerank=True)).get("/api/info").json()["rerank"] is True
+    body = TestClient(make_app()).get("/api/search", params={"q": "gradient descent"}).json()
+    assert body["reranked"] is False and "rerank_ms" not in body
+
+
+def test_run_search_reranks_the_fused_candidates():
+    reranker = ReverseReranker()
+    run_search = make_app(reranker, rerank=True).state.run_search
+
+    plain = run_search("gradient descent learning rate", k=20)
+    reranked = run_search("gradient descent learning rate", k=20, rerank=True)
+
+    assert len(reranker.calls) == 1, "only the reranked search calls the reranker"
+    query, documents = reranker.calls[0]
+    assert query == "gradient descent learning rate" and len(documents) >= 2
+    assert all(document.strip() for document in documents)
+    assert reranked["reranked"] is True and reranked["rerank_ms"] >= 0
+    # The highest score went to the last candidate, so it now comes first.
+    assert reranked["results"][0]["moment_id"] != plain["results"][0]["moment_id"]
+    assert [r["rank"] for r in reranked["results"]] == list(range(1, reranked["count"] + 1))
+    assert {r["moment_id"] for r in reranked["results"]} <= {
+        r["moment_id"] for r in run_search("gradient descent learning rate", k=20)["results"]
+    } | {r["moment_id"] for r in plain["results"]}
+
+
+def test_run_search_refuses_what_the_api_refuses():
+    from lecturelens.web.server import BadRequest
+
+    run_search = make_app().state.run_search
+    for arguments in [("   ",), ("x" * (MAX_QUERY_CHARS + 1),), ("x", 0), ("x", 5, ["nope"])]:
+        with pytest.raises(BadRequest):
+            run_search(*arguments)
+
+
+def test_routes_attach_to_an_existing_application_and_leave_room_for_its_own():
+    from fastapi import FastAPI
+
+    host = FastAPI()
+    returned = make_app(app=host)
+    assert returned is host
+
+    # Added after ours, as Gradio's server adds its routes at launch.
+    @host.get("/later")
+    def later():
+        return {"reached": True}
+
+    client = TestClient(host)
+    assert "LectureLens" in client.get("/").text
+    assert client.get("/api/search", params={"q": "chain rule"}).status_code == 200
+    assert client.get("/later").json() == {"reached": True}
+
+
+def test_frontend_files_are_served_one_by_one(client):
+    from lecturelens.web.server import STATIC_DIR
+
+    vendored = client.get("/vendor/gradio-client.js")
+    assert vendored.status_code == 200 and "javascript" in vendored.headers["content-type"]
+    assert client.head("/styles.css").status_code == 200
+    # Conditional requests still work, as they did when the directory was mounted whole.
+    etag = client.get("/app.js").headers["etag"]
+    assert client.get("/app.js", headers={"If-None-Match": etag}).status_code == 304
+    assert client.get("/vendor/").status_code == 404
+    for path in STATIC_DIR.rglob("*"):
+        if path.is_file() and not path.name.startswith("."):
+            assert client.get(f"/{path.relative_to(STATIC_DIR).as_posix()}").status_code == 200
+
+
+def test_the_script_loads_the_gradio_client_from_this_origin_only():
+    from lecturelens.web.server import STATIC_DIR
+
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert 'import("/vendor/gradio-client.js")' in script
+    assert "cdn." not in script and "https://" not in script.replace(
+        "https://www.youtube-nocookie.com", ""
+    )
+    vendored = (STATIC_DIR / "vendor" / "gradio-client.js").read_text(encoding="utf-8")
+    assert vendored.startswith("/* Gradio JavaScript client, @gradio/client ")
+    assert "eval(" not in vendored and "new Function" not in vendored

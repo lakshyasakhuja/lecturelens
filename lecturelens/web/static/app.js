@@ -1,7 +1,8 @@
 /* LectureLens frontend.
  *
- * Plain JavaScript, no dependencies and no build step. Everything shown comes from two
- * endpoints: /api/info (what the index contains) and /api/search (the moments for a query).
+ * Plain JavaScript and no build step. Everything shown comes from two endpoints:
+ * /api/info (what the index contains) and /api/search (the moments for a query). Where the
+ * server offers it, a third call reranks the results on a GPU; see "reranking" below.
  * Text from the server is only ever inserted as text nodes, never as HTML.
  */
 (() => {
@@ -12,6 +13,8 @@
   const form = $("search");
   const input = $("query");
   const lectureSelect = $("lecture");
+  const rerankOption = $("rerank-option");
+  const rerankToggle = $("rerank");
   const examples = $("examples");
   const resultsSection = $("results");
   const grid = $("results-grid");
@@ -299,11 +302,50 @@
     for (const result of data.results) grid.append(renderResult(result));
 
     const where = lectureSelect.value ? ` in ${lectureSelect.selectedOptions[0].textContent}` : "";
-    status.textContent = `${plural(data.count, "moment")}${where} · ${Math.round(data.took_ms)} ms`;
+    const reranked = data.reranked ? ` · reranked in ${(data.rerank_ms / 1000).toFixed(1)} s` : "";
+    status.textContent = `${plural(data.count, "moment")}${where} · ${Math.round(data.took_ms)} ms${reranked}`;
     // A search that ran while the models were still loading says nothing about speed.
     if (data.warm) {
       $("stat-latency").textContent = `${Math.round(data.took_ms)} ms`;
       $("stat-latency-label").textContent = "this search, encoders included";
+    }
+  }
+
+  /* ------------------------------------------------------------ reranking
+   *
+   * Offered only where the server says it can (a Hugging Face Space on ZeroGPU, which lends
+   * a GPU for the length of one call). The results of the ordinary search are shown first
+   * and replaced when the reranked order arrives; if it never does, they simply stay.
+   *
+   * The call goes through Gradio's own client rather than fetch. On a Space that client
+   * asks the surrounding huggingface.co page who the visitor is, which is how the GPU time
+   * is counted against the visitor's own free allowance.
+   */
+  let gradioClient = null;
+
+  function connectGradio() {
+    if (!gradioClient) {
+      gradioClient = import("/vendor/gradio-client.js")
+        .then(({ Client }) => Client.connect(location.origin))
+        .catch((error) => {
+          gradioClient = null;
+          throw error;
+        });
+    }
+    return gradioClient;
+  }
+
+  async function refine(query, lecture, count, signal) {
+    const firstStage = status.textContent;
+    status.textContent = `${firstStage} · reranking on a GPU`;
+    try {
+      const client = await connectGradio();
+      const reply = await client.predict("/rerank", { query, k: count, lectures: lecture ? [lecture] : null });
+      if (signal.aborted) return;
+      renderResults(reply.data[0]);
+    } catch (error) {
+      if (signal.aborted) return;
+      status.textContent = `${firstStage} · not reranked: no GPU was free, or today's free GPU time is used up`;
     }
   }
 
@@ -315,9 +357,10 @@
     inFlight = new AbortController();
     const { signal } = inFlight;
 
+    const lecture = lectureSelect.value;
     const params = new URLSearchParams({ q: query });
-    if (lectureSelect.value) params.set("lecture", lectureSelect.value);
-    if (push) history.pushState({ query, lecture: lectureSelect.value }, "", `?${params}`);
+    if (lecture) params.set("lecture", lecture);
+    if (push) history.pushState({ query, lecture }, "", `?${params}`);
 
     resultsSection.hidden = false;
     resultsTitle.textContent = `“${query}”`;
@@ -331,6 +374,10 @@
       const data = await getJSON(`/api/search?${params}`, signal);
       if (info) info.ready = true;
       renderResults(data);
+      // Reordering one result is not worth a GPU.
+      if (rerankToggle.checked && !rerankOption.hidden && data.count > 1) {
+        await refine(query, lecture, data.count, signal);
+      }
     } catch (error) {
       if (error.name === "AbortError") return;
       grid.textContent = "";
@@ -387,6 +434,10 @@
 
   lectureSelect.addEventListener("change", () => {
     if (input.value.trim()) search(input.value, { push: true });
+  });
+
+  rerankToggle.addEventListener("change", () => {
+    if (input.value.trim()) search(input.value);
   });
 
   document.addEventListener("keydown", (event) => {
@@ -474,6 +525,7 @@
       resultsSection.hidden = false;
       return;
     }
+    rerankOption.hidden = !info.rerank;
     renderStats();
     renderLectureFilter();
     renderExamples();

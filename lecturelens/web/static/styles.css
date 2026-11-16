@@ -451,9 +451,10 @@ button {
 
 .search__options {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px 16px;
   margin-top: 14px;
   padding-inline: 6px;
 }
@@ -461,6 +462,7 @@ button {
 .search__hint {
   font-size: 12px;
   color: var(--text-3);
+  white-space: nowrap;
 }
 
 kbd {
@@ -480,15 +482,91 @@ kbd {
   }
 }
 
+.search__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  min-width: 0;
+}
+
 .select {
   position: relative;
   display: inline-flex;
   align-items: center;
-  max-width: 100%;
+  /* A plain length, not min(100%, ...): a percentage here is ignored when the row works out
+     how much room it needs, and the hint beside it would wrap for no reason. */
+  max-width: 320px;
+}
+
+@media (max-width: 400px) {
+  .select {
+    max-width: 100%;
+  }
+}
+
+/* The reranker switch. Shown only where the server has a GPU to lend. */
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  letter-spacing: -0.016em;
+  color: var(--text-2);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.switch__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.switch__track {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 22px;
+  border-radius: 11px;
+  background: #e3e3e8;
+  transition: background 0.2s;
+}
+
+.switch__track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s var(--ease);
+}
+
+.switch__input:checked + .switch__track {
+  background: #34c759;
+}
+
+.switch__input:checked + .switch__track::after {
+  transform: translateX(14px);
+}
+
+.switch__input:focus-visible + .switch__track {
+  box-shadow: 0 0 0 4px var(--focus);
+}
+
+.switch__input:checked ~ .switch__label {
+  color: var(--text);
 }
 
 .select select {
-  max-width: min(100%, 420px);
+  width: 100%;
   padding: 6px 30px 6px 14px;
   border: 0;
   border-radius: 980px;

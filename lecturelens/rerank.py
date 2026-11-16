@@ -7,6 +7,10 @@ so it is applied only to the top 20 fused candidates.
 Qwen3-Reranker is a causal language model used as a classifier. Each (query, document)
 pair is written into a chat prompt that asks whether the document answers the query, and
 the score is the probability the model puts on "yes" versus "no" as its next token.
+
+Scoring is two steps, ``prompts`` (tokenising, on a CPU) and ``score_prompts`` (the forward
+passes). They are separate so that a host which lends out a GPU by the second can run only
+the second step on it.
 """
 
 from __future__ import annotations
@@ -44,6 +48,11 @@ class Reranker:
         self._model = None
         self._tokenizer = None
 
+    def load(self) -> Reranker:
+        """Load the tokenizer and the model now rather than on first use."""
+        self._load()
+        return self
+
     def _load(self):
         if self._model is None:
             import torch
@@ -71,16 +80,19 @@ class Reranker:
         body_ids = tokenizer.encode(body, add_special_tokens=False)[:budget]
         return self._prefix_ids + body_ids + self._suffix_ids
 
-    def score(self, query: str, documents: Sequence[str]) -> np.ndarray:
-        """Relevance of each document to the query, as P("yes") in [0, 1]."""
+    def prompts(self, query: str, documents: Sequence[str]) -> list[list[int]]:
+        """The token ids of one yes/no prompt per document."""
+        self._load()
+        return [self._prompt_ids(query, document) for document in documents]
+
+    def score_prompts(self, prompts: Sequence[Sequence[int]]) -> np.ndarray:
+        """P("yes") in [0, 1] for each prompt, in order."""
         import torch
 
         model, tokenizer = self._load()
         scores: list[float] = []
-        for start in range(0, len(documents), self.batch_size):
-            batch = [
-                self._prompt_ids(query, doc) for doc in documents[start : start + self.batch_size]
-            ]
+        for start in range(0, len(prompts), self.batch_size):
+            batch = [list(ids) for ids in prompts[start : start + self.batch_size]]
             inputs = tokenizer.pad({"input_ids": batch}, padding=True, return_tensors="pt").to(
                 self.device
             )
@@ -89,3 +101,7 @@ class Reranker:
             pair = torch.stack([logits[:, self._no], logits[:, self._yes]], dim=1)
             scores.extend(torch.softmax(pair, dim=1)[:, 1].cpu().tolist())
         return np.asarray(scores, dtype=np.float64)
+
+    def score(self, query: str, documents: Sequence[str]) -> np.ndarray:
+        """Relevance of each document to the query, as P("yes") in [0, 1]."""
+        return self.score_prompts(self.prompts(query, documents))

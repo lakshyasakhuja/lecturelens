@@ -13,6 +13,9 @@ template) or, when run locally with a directory of recordings, plays the local f
 Search runs on a CPU. One query at a time goes through the encoders, guarded by a lock: a
 query takes about a tenth of a second, and serialising them is simpler and safer than
 letting several threads share the models.
+
+The routes can be attached to an application that already exists (``create_app(app=...)``),
+which is how the Hugging Face Space runs them on Gradio's server: see ``space.py``.
 """
 
 from __future__ import annotations
@@ -38,6 +41,11 @@ from lecturelens.utils import format_timestamp, read_json
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_QUERY_CHARS = 300
 MAX_RESULTS = 20
+
+
+class BadRequest(ValueError):
+    """The request cannot be answered as asked; the message says why, for the visitor."""
+
 
 _YOUTUBE_ID = re.compile(r"(?:youtube\.com/watch\?(?:.*&)?v=|youtu\.be/)([A-Za-z0-9_-]{6,})")
 
@@ -136,8 +144,16 @@ def create_app(
     benchmark: Mapping[str, Any] | None = None,
     device: str = "cpu",
     warm_up: bool = True,
+    app: FastAPI | None = None,
+    rerank: bool = False,
 ) -> FastAPI:
-    """Build the application around a loaded index."""
+    """Build the application around a loaded index.
+
+    ``app`` attaches the routes to an existing application instead of a new one. ``rerank``
+    says that the host offers the cross-encoder as a second stage: ``/api/info`` reports it
+    so the page can show the option, and ``app.state.run_search(..., rerank=True)`` runs it.
+    The JSON API itself never reranks; the host decides how that step is reached.
+    """
     searcher = searcher or Searcher(index, device=device)
     local_videos = find_local_videos(videos_dir, index.lectures)
     lock = threading.Lock()
@@ -155,7 +171,8 @@ def create_app(
     else:
         ready.set()
 
-    app = FastAPI(title="LectureLens", version=__version__, docs_url=None, redoc_url=None)
+    if app is None:
+        app = FastAPI(title="LectureLens", version=__version__, docs_url=None, redoc_url=None)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -247,7 +264,48 @@ def create_app(
             "lectures": lectures,
             "examples": list(examples),
             "benchmark": benchmark,
+            "rerank": rerank,
         }
+
+    def run_search(
+        q: str, k: int = 5, lecture: Sequence[str] | None = None, *, rerank: bool = False
+    ) -> dict[str, Any]:
+        """Answer one query. Raises ``BadRequest`` for a query that cannot be answered."""
+        query = " ".join(str(q).split())
+        if not query:
+            raise BadRequest("The query is empty.")
+        if len(query) > MAX_QUERY_CHARS:
+            raise BadRequest(f"The query is longer than {MAX_QUERY_CHARS} characters.")
+        if not 1 <= k <= MAX_RESULTS:
+            raise BadRequest(f"Ask for between 1 and {MAX_RESULTS} moments.")
+        unknown = sorted(set(lecture or []) - set(index.lectures))
+        if unknown:
+            raise BadRequest(f"Unknown lecture: {', '.join(unknown)}")
+
+        was_ready = ready.is_set()
+        with lock:
+            # Timed inside the lock: the figure is the search itself, not time spent queued
+            # behind another query or behind the models loading.
+            started = time.perf_counter()
+            encoding = searcher.encode(query)
+            order, scores, per_ranker = searcher.fuse(
+                encoding, mask=searcher.lecture_mask(lecture or None)
+            )
+            took_ms = (time.perf_counter() - started) * 1000.0
+        payload: dict[str, Any] = {"query": query, "took_ms": round(took_ms, 1), "warm": was_ready}
+        if rerank and order:
+            # Outside the lock: the reranker may wait for a GPU, and plain searches from
+            # other visitors should not wait with it.
+            started = time.perf_counter()
+            order, scores = searcher.rerank(query, order, scores)
+            payload["rerank_ms"] = round((time.perf_counter() - started) * 1000.0, 1)
+        results = searcher.results(order, scores, encoding, per_ranker, k)
+        payload["reranked"] = "rerank_ms" in payload
+        payload["count"] = len(results)
+        payload["results"] = [serialise(result) for result in results]
+        return payload
+
+    app.state.run_search = run_search
 
     @app.get("/api/search")
     def search(
@@ -255,35 +313,14 @@ def create_app(
         k: int = Query(5, ge=1, le=MAX_RESULTS, description="How many moments to return."),
         lecture: list[str] | None = Query(None, description="Restrict to these lecture ids."),
     ) -> dict[str, Any]:
-        query = " ".join(q.split())
-        if not query:
-            raise HTTPException(status_code=400, detail="The query is empty.")
-        if len(query) > MAX_QUERY_CHARS:
-            raise HTTPException(
-                status_code=400, detail=f"The query is longer than {MAX_QUERY_CHARS} characters."
-            )
-        unknown = sorted(set(lecture or []) - set(index.lectures))
-        if unknown:
-            raise HTTPException(status_code=400, detail=f"Unknown lecture: {', '.join(unknown)}")
-
-        was_ready = ready.is_set()
-        with lock:
-            # Timed inside the lock: the figure is the search itself, not time spent queued
-            # behind another query or behind the models loading.
-            started = time.perf_counter()
-            results = searcher.search(query, top_k=k, lectures=lecture or None)
-            took_ms = (time.perf_counter() - started) * 1000.0
-        return {
-            "query": query,
-            "took_ms": round(took_ms, 1),
-            "warm": was_ready,
-            "count": len(results),
-            "results": [serialise(result) for result in results],
-        }
+        try:
+            return run_search(q, k, lecture)
+        except BadRequest as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @app.exception_handler(404)
     async def not_found(request: Request, exc: Exception):
-        if request.url.path.startswith("/api/"):
+        if request.url.path.startswith(("/api/", "/gradio_api/")):
             return JSONResponse({"detail": "Not found."}, status_code=404)
         return FileResponse(STATIC_DIR / "index.html", status_code=404)
 
@@ -291,8 +328,45 @@ def create_app(
         app.mount("/thumbs", StaticFiles(directory=index.root / "thumbs"), name="thumbs")
     if local_videos:
         app.mount("/videos", StaticFiles(directory=Path(videos_dir)), name="videos")
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")
+    add_frontend(app)
     return app
+
+
+def add_frontend(app: FastAPI) -> None:
+    """Serve the static frontend: one route per file, and the page itself at ``/``.
+
+    A catch-all mount at ``/`` would be shorter, but it would also swallow every route added
+    after it, and a host such as Gradio's server adds its own once the app is launched.
+    """
+    files = StaticFiles(directory=STATIC_DIR)
+
+    def serve(relative: str):
+        async def asset(request: Request):
+            return await files.get_response(relative, request.scope)
+
+        return asset
+
+    for path in sorted(STATIC_DIR.rglob("*")):
+        relative = path.relative_to(STATIC_DIR)
+        if path.is_file() and not any(part.startswith(".") for part in relative.parts):
+            app.add_api_route(
+                f"/{relative.as_posix()}",
+                serve(relative.as_posix()),
+                methods=["GET", "HEAD"],
+                include_in_schema=False,
+            )
+    app.add_api_route("/", serve("index.html"), methods=["GET", "HEAD"], include_in_schema=False)
+
+
+def load_index_from_env() -> Index:
+    """The index named by ``LECTURELENS_INDEX``, downloaded first if it is not there yet."""
+    index_dir = Path(os.environ.get("LECTURELENS_INDEX", "index"))
+    repo = os.environ.get("LECTURELENS_INDEX_REPO")
+    if repo and not (index_dir / "manifest.json").is_file():
+        from lecturelens.publish import pull_index
+
+        return pull_index(repo, index_dir)
+    return Index.load(index_dir)
 
 
 def create_app_from_env() -> FastAPI:
@@ -311,14 +385,7 @@ def create_app_from_env() -> FastAPI:
     from lecturelens.logs import configure_logging
 
     configure_logging()
-    index_dir = Path(os.environ.get("LECTURELENS_INDEX", "index"))
-    repo = os.environ.get("LECTURELENS_INDEX_REPO")
-    if repo and not (index_dir / "manifest.json").is_file():
-        from lecturelens.publish import pull_index
-
-        index = pull_index(repo, index_dir)
-    else:
-        index = Index.load(index_dir)
+    index = load_index_from_env()
     return create_app(
         index,
         videos_dir=os.environ.get("LECTURELENS_VIDEOS") or None,

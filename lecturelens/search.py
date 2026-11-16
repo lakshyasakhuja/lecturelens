@@ -413,6 +413,22 @@ class Searcher:
         )
         if rerank and order:
             order, scores = self.rerank(query, order, scores)
+        return self.results(order, scores, encoding, per_ranker, top_k)
+
+    def results(
+        self,
+        order: Sequence[int],
+        scores: Mapping[int, float],
+        encoding: QueryEncoding,
+        per_ranker: Mapping[str, Mapping[int, int]],
+        top_k: int | None = None,
+    ) -> list[Result]:
+        """Turn a ranking into results: drop near-duplicates, keep ``top_k``, explain each.
+
+        Runs no model, so a caller that ranks in two steps (fuse, then rerank elsewhere)
+        can call it for either ranking.
+        """
+        top_k = top_k or self.config.top_k
         kept = dedupe(order, self._lecture_ids, self._starts, self.config.dedupe_window_s, top_k)
         return [
             self._explain(position, row, scores[row], encoding, per_ranker)
