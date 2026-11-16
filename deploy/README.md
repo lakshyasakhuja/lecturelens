@@ -1,7 +1,9 @@
 # Deploying the web app
 
-The app is one container: the search API and the static frontend, on a CPU. It needs about
-6 GB of memory for the two query encoders. It does not need a GPU.
+The app is one container: the search API and the static frontend, on a CPU. With both
+query encoders loaded it used about 4 GB of memory in a local container run, so a host
+with 8 GB or more is a comfortable fit and one with 4 GB is at the limit. It does not need
+a GPU.
 
 ## Locally
 
@@ -23,8 +25,16 @@ docker run -p 7860:7860 -v "$PWD/index:/home/user/index" lecturelens
 
 ## On Hugging Face Spaces
 
-The hosted demo is a Docker Space on the free CPU tier. The index lives in a separate
-dataset repository so that it can be rebuilt without redeploying the app.
+The image is built to run as a Docker Space on CPU Basic hardware (2 vCPU, 16 GB), which
+has no hourly charge. Creating a Docker Space on a personal account needs a Hugging Face
+PRO plan; a free account can create static Spaces and up to two Gradio Spaces on ZeroGPU,
+and this app is neither. That is how the
+[Spaces overview](https://huggingface.co/docs/hub/en/spaces-overview) and the
+[pricing page](https://huggingface.co/pricing) read in November 2026, so check them before
+relying on it.
+
+The index lives in a separate dataset repository so that it can be rebuilt without
+redeploying the app.
 
 1. Publish the index (after `lecturelens index`):
 
@@ -55,6 +65,13 @@ dataset repository so that it can be rebuilt without redeploying the app.
    ```
 
 The Space builds the image, downloads the index on first start, and serves on port 7860.
+
+## On another container host
+
+Any host that runs a Docker image works: set `LECTURELENS_INDEX_REPO` (or mount an index
+at `/home/user/index`) and route traffic to port 7860. Memory is what decides the plan.
+Free and entry-level instances with 512 MB to 2 GB cannot load the encoders; pick one with
+8 GB.
 
 ## Configuration
 
