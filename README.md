@@ -45,7 +45,7 @@ $ slideseek search --picture photo-of-the-projector.jpg
 | Web app: search page, player, JSON API, container image, Hugging Face Space | Built. `slideseek serve` runs it on any index. |
 | Course for the public demo | Chosen and indexed locally: five lectures of MIT 6.7960 Deep Learning (Fall 2024), 6.5 hours, 678 moments. |
 | **Benchmark results on real lectures** | **Not yet.** The queries, slide transitions and transcript excerpts still have to be annotated by hand. No numbers are claimed until then. |
-| Hosted demo | **Live** at <https://lakshyasakhuja-slideseek.hf.space>, a free Hugging Face Space on ZeroGPU, put there by `slideseek deploy`. Search works; reranking on a GPU is switched off there because it fails on ZeroGPU ([what was found](deploy/README.md#what-the-first-deployment-showed)). |
+| Hosted demo | **Live** at <https://lakshyasakhuja-slideseek.hf.space>, a free Hugging Face Space on ZeroGPU, put there by `slideseek deploy`. Searching with a question (about 0.15 s) and with a picture (about 5 s, most of it OCR, on the Space's shared CPU) both work there; reranking on a GPU is switched off there because it fails on ZeroGPU ([what was found](deploy/README.md#what-the-first-deployment-showed)). |
 
 More than 260 unit tests run in CI on every push, with no model downloads. A further integration test (`pytest -m models`) runs the whole system with the real models on synthetic lectures.
 
@@ -318,7 +318,7 @@ Measured on the five real lectures, with no hand annotation: `eval/eval_screensh
 On these pictures OCR adds little. Fused, the top five is at most a point better than the image alone, and for crops the first result is slightly worse (78% against 80%). OCR stays because it is cheap, and because the page can then show the words it read; whether it earns its place needs harder pictures than these, such as real phone photos. Most misses at rank 1 land on a neighbouring slide. In a check of 60 image-only queries, 4 of the 9 misses were the same slide shown again at another point in the lecture, which this strict count scores as wrong. The phone photos are simulated, not taken with a phone.
 
 ```bash
-PYTHONPATH=. python eval/eval_screenshot.py --index index --videos videos --per-lecture 20
+python eval/eval_screenshot.py --index index --videos videos --per-lecture 20
 ```
 
 <details>

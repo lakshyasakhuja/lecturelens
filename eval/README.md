@@ -136,5 +136,5 @@ result shows the slide the frame came from. It compares the image signal, the OC
 and the two fused, and writes `results/screenshot/metrics.json`, which the web app shows.
 
 ```bash
-PYTHONPATH=. python eval/eval_screenshot.py --index index --videos videos --per-lecture 20
+python eval/eval_screenshot.py --index index --videos videos --per-lecture 20
 ```

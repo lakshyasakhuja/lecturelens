@@ -17,7 +17,7 @@ frame came from. Three ways of searching are compared:
 
 Run from the repository root:
 
-    .venv/bin/python eval/eval_screenshot.py --index index --videos videos --per-lecture 25
+    .venv/bin/python eval/eval_screenshot.py --index index --videos videos --per-lecture 20
 """
 
 from __future__ import annotations
@@ -25,11 +25,14 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 
+# Make the script runnable from a checkout whether or not the package is installed.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from slideseek.index import Index
 from slideseek.ingest import extract_still
 from slideseek.search import Searcher
