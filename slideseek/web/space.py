@@ -16,7 +16,7 @@ JavaScript client, which is what carries the visitor's identity to ZeroGPU.
 Outside ZeroGPU, ``@spaces.GPU`` does nothing and the reranker runs on whatever device it
 is given, so the Space can be run and tested on a laptop.
 
-Reranking is off unless ``LECTURELENS_RERANK=1``, because on ZeroGPU it does not work yet.
+Reranking is off unless ``SLIDESEEK_RERANK=1``, because on ZeroGPU it does not work yet.
 Measured on the deployed Space in November 2026 (torch 2.13.0, spaces 0.51.3): a GPU call
 succeeds until the Qwen3 text encoder has run one forward pass on the CPU in this process,
 and from then on every call fails in ZeroGPU's worker with "No CUDA GPUs are available".
@@ -38,11 +38,11 @@ import gradio
 import numpy as np
 import spaces
 
-from lecturelens import __version__
-from lecturelens.index import Index
-from lecturelens.rerank import Reranker
-from lecturelens.search import Searcher
-from lecturelens.web.server import (
+from slideseek import __version__
+from slideseek.index import Index
+from slideseek.rerank import Reranker
+from slideseek.search import Searcher
+from slideseek.web.server import (
     BadRequest,
     create_app,
     load_benchmark,
@@ -64,8 +64,8 @@ def on_zero_gpu() -> bool:
 
 
 def rerank_enabled() -> bool:
-    """Does the environment ask for reranking? ``LECTURELENS_RERANK=1`` turns it on."""
-    return os.environ.get("LECTURELENS_RERANK", "").lower() in {"1", "t", "true", "yes", "on"}
+    """Does the environment ask for reranking? ``SLIDESEEK_RERANK=1`` turns it on."""
+    return os.environ.get("SLIDESEEK_RERANK", "").lower() in {"1", "t", "true", "yes", "on"}
 
 
 @spaces.GPU(duration=1)
@@ -130,7 +130,7 @@ def create_space(
         searcher.warm_up_pictures()
 
     server = gradio.Server(
-        title="LectureLens", version=__version__, docs_url=None, redoc_url=None, openapi_url=None
+        title="Slideseek", version=__version__, docs_url=None, redoc_url=None, openapi_url=None
     )
     create_app(
         index,
@@ -162,12 +162,12 @@ def create_space(
 def create_space_from_env() -> gradio.Server:
     """The Space, configured from the environment like ``create_app_from_env``.
 
-    It reads the same variables: ``LECTURELENS_INDEX``, ``LECTURELENS_INDEX_REPO``,
-    ``LECTURELENS_EXAMPLES``, ``LECTURELENS_BENCHMARK`` and ``LECTURELENS_DEVICE`` (the
-    device of the query encoders, ``cpu`` unless set), and one more: ``LECTURELENS_RERANK``,
+    It reads the same variables: ``SLIDESEEK_INDEX``, ``SLIDESEEK_INDEX_REPO``,
+    ``SLIDESEEK_EXAMPLES``, ``SLIDESEEK_BENCHMARK`` and ``SLIDESEEK_DEVICE`` (the
+    device of the query encoders, ``cpu`` unless set), and one more: ``SLIDESEEK_RERANK``,
     which turns reranking on when it is ``1``.
     """
-    from lecturelens.logs import configure_logging
+    from slideseek.logs import configure_logging
 
     configure_logging()
     # The reranker is tokenised in this process and scored in one forked from it.
@@ -177,15 +177,15 @@ def create_space_from_env() -> gradio.Server:
         index,
         rerank=rerank_enabled(),
         examples=load_examples(
-            os.environ.get("LECTURELENS_EXAMPLES", "config/examples.json"), index.lectures
+            os.environ.get("SLIDESEEK_EXAMPLES", "config/examples.json"), index.lectures
         ),
         benchmark=load_benchmark(
-            os.environ.get("LECTURELENS_BENCHMARK", "results/test/metrics.json")
+            os.environ.get("SLIDESEEK_BENCHMARK", "results/test/metrics.json")
         ),
         picture_benchmark=load_picture_benchmark(
-            os.environ.get("LECTURELENS_PICTURE_BENCHMARK", "results/screenshot/metrics.json")
+            os.environ.get("SLIDESEEK_PICTURE_BENCHMARK", "results/screenshot/metrics.json")
         ),
-        device=os.environ.get("LECTURELENS_DEVICE", "cpu"),
+        device=os.environ.get("SLIDESEEK_DEVICE", "cpu"),
     )
 
 

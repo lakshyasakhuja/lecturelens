@@ -1,5 +1,5 @@
 # What the Hugging Face Space installs. A Gradio Space installs this file and nothing else:
-# it does not install the lecturelens package, which app.py imports from the files beside it.
+# it does not install the slideseek package, which app.py imports from the files beside it.
 # Gradio and `spaces` are not listed because the Space's SDK version provides them.
 # Keep in step with pyproject.toml (tests/test_space.py checks that nothing is missing).
 

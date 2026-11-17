@@ -40,15 +40,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from lecturelens import asr, ingest, ocr
-from lecturelens.catalog import Lecture
-from lecturelens.embed import EmbedConfig, ImageEmbedder, TextEmbedder
-from lecturelens.index import Index
-from lecturelens.moments import MomentConfig, build_moments, moment_text, plan_windows
-from lecturelens.slides import SlideConfig, SlideSegment, detect_slides, load_slide_config
-from lecturelens.utils import format_timestamp, read_json, write_json
+from slideseek import asr, ingest, ocr
+from slideseek.catalog import Lecture
+from slideseek.embed import EmbedConfig, ImageEmbedder, TextEmbedder
+from slideseek.index import Index
+from slideseek.moments import MomentConfig, build_moments, moment_text, plan_windows
+from slideseek.slides import SlideConfig, SlideSegment, detect_slides, load_slide_config
+from slideseek.utils import format_timestamp, read_json, write_json
 
-log = logging.getLogger("lecturelens")
+log = logging.getLogger("slideseek")
 
 
 @dataclass(frozen=True)

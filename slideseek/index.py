@@ -37,9 +37,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from lecturelens import __version__
-from lecturelens.catalog import Lecture
-from lecturelens.utils import read_json, write_json
+from slideseek import __version__
+from slideseek.catalog import Lecture
+from slideseek.utils import read_json, write_json
 
 INDEX_FORMAT = 1
 TEXT_VECTORS = ("text", "speech", "slide")
@@ -144,7 +144,7 @@ class Index:
         manifest = {
             **self.manifest,
             "format": INDEX_FORMAT,
-            "lecturelens_version": __version__,
+            "slideseek_version": __version__,
             "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "n_moments": len(self.moments),
             "n_keyframes": len(self.image),
@@ -164,7 +164,7 @@ class Index:
         manifest_path = root / "manifest.json"
         if not manifest_path.is_file():
             raise InvalidIndex(
-                f"no index at {root} (manifest.json not found). Build one with `lecturelens index`."
+                f"no index at {root} (manifest.json not found). Build one with `slideseek index`."
             )
         manifest = read_json(manifest_path)
         if manifest.get("format") != INDEX_FORMAT:

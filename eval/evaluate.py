@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import typer
 from rich.console import Console
 
-from lecturelens import metrics
-from lecturelens.evaluation import (
+from slideseek import metrics
+from slideseek.evaluation import (
     ABLATION,
     BASELINE,
     EXTRAS,
@@ -41,10 +41,10 @@ from lecturelens.evaluation import (
     tune,
     tuned_system,
 )
-from lecturelens.index import Index, InvalidIndex
-from lecturelens.logs import configure_logging
-from lecturelens.search import Searcher
-from lecturelens.utils import read_json, write_json
+from slideseek.index import Index, InvalidIndex
+from slideseek.logs import configure_logging
+from slideseek.search import Searcher
+from slideseek.utils import read_json, write_json
 
 console = Console()
 configure_logging(console)

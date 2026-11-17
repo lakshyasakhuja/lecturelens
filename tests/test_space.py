@@ -16,8 +16,8 @@ pytest.importorskip("spaces", reason="the space extra is not installed")
 from fakes import FakeImageEmbedder, FakeTextEmbedder, make_index
 from fastapi.testclient import TestClient
 
-from lecturelens.search import Searcher
-from lecturelens.web.space import (
+from slideseek.search import Searcher
+from slideseek.web.space import (
     GpuReranker,
     create_space,
     launch,
@@ -71,11 +71,11 @@ def test_not_on_zero_gpu_here(monkeypatch):
 
 
 def test_reranking_is_off_unless_the_environment_asks(monkeypatch):
-    monkeypatch.delenv("LECTURELENS_RERANK", raising=False)
+    monkeypatch.delenv("SLIDESEEK_RERANK", raising=False)
     assert rerank_enabled() is False
-    monkeypatch.setenv("LECTURELENS_RERANK", "0")
+    monkeypatch.setenv("SLIDESEEK_RERANK", "0")
     assert rerank_enabled() is False
-    monkeypatch.setenv("LECTURELENS_RERANK", "1")
+    monkeypatch.setenv("SLIDESEEK_RERANK", "1")
     assert rerank_enabled() is True
 
 
@@ -89,7 +89,7 @@ def test_a_space_without_reranking_loads_no_reranker_and_has_no_endpoint():
     _, url, _ = launch(server, prevent_thread_lock=True, server_port=free_port(), quiet=True)
     try:
         client = TestClient(server)
-        assert "LectureLens" in client.get("/").text
+        assert "Slideseek" in client.get("/").text
         assert client.get("/api/info").json()["rerank"] is False
         assert client.get("/api/search", params={"q": "chain rule"}).json()["count"] >= 1
         with pytest.raises(Exception):  # noqa: B017 -- gradio_client has no one error type
@@ -100,7 +100,7 @@ def test_a_space_without_reranking_loads_no_reranker_and_has_no_endpoint():
 
 def test_the_space_serves_the_same_page_and_api():
     client = TestClient(make_space())
-    assert "LectureLens" in client.get("/").text
+    assert "Slideseek" in client.get("/").text
     info = client.get("/api/info").json()
     assert info["rerank"] is True and info["n_moments"] > 0
     body = client.get("/api/search", params={"q": "chain rule"}).json()
@@ -136,7 +136,7 @@ def test_reranking_is_a_gradio_call():
 
         # Gradio's own routes are reachable beside ours, and ours still win at "/".
         assert TestClient(server).get("/gradio_api/info").status_code == 200
-        assert "LectureLens" in TestClient(server).get("/").text
+        assert "Slideseek" in TestClient(server).get("/").text
     finally:
         server.get_blocks().close()
 

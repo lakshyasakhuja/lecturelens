@@ -1,21 +1,23 @@
-# LectureLens
+# Slideseek
 
-[![CI](https://github.com/lakshyasakhuja/lecturelens/actions/workflows/ci.yml/badge.svg)](https://github.com/lakshyasakhuja/lecturelens/actions/workflows/ci.yml)
+[![CI](https://github.com/lakshyasakhuja/slideseek/actions/workflows/ci.yml/badge.svg)](https://github.com/lakshyasakhuja/slideseek/actions/workflows/ci.yml)
 
 **Find the slide. Hear it explained.**
+
+<sub>Formerly LectureLens.</sub>
 
 Search lecture recordings by asking a question in plain English, such as *"where did she explain why we need a validation set?"*, or by **showing it a picture of a slide**: a phone photo of the projector, a screenshot of the recording, or a crop of the part you are stuck on. It takes you to the moment in the video where that slide was on screen.
 
 Each result is ranked using three signals: what was **said**, what text was **on the slide**, and what the slide **looked like**. Nothing is generated. Every result is the lecture itself, the slide as it was shown and the sentence as it was said, so there is nothing to make up and nothing to check.
 
-![The LectureLens web app showing results for a question](docs/screenshot.jpg)
+![The Slideseek web app showing results for a question](docs/screenshot.jpg)
 
-<sub>The web app, here searching the two synthetic demo lectures that `lecturelens demo` generates.</sub>
+<sub>The web app, here searching the two synthetic demo lectures that `slideseek demo` generates.</sub>
 
 The same search from the command line:
 
 ```console
-$ lecturelens search "the student who memorises last year's exam answers"
+$ slideseek search "the student who memorises last year's exam answers"
 
 1. Generalisation and Overfitting  at  1:00   said
    … is to stop training early. Think of a student preparing for an exam by
@@ -28,7 +30,7 @@ $ lecturelens search "the student who memorises last year's exam answers"
 Or with a picture of a slide:
 
 ```console
-$ lecturelens search --picture photo-of-the-projector.jpg
+$ slideseek search --picture photo-of-the-projector.jpg
 ```
 
 ## Status
@@ -40,10 +42,10 @@ $ lecturelens search --picture photo-of-the-projector.jpg
 | Search with a picture of a slide: image similarity + OCR, fused | Built and measured on the five real lectures: the right slide comes first for 70 to 86% of pictures and is in the top five for 92 to 97% ([results](#search-by-picture)). |
 | CLI, resumable and incremental indexing, publishing to Hugging Face | Built. |
 | Evaluation harness: retrieval ablations, slide transitions, word error rate | Built, and exercised end to end on synthetic lectures. |
-| Web app: search page, player, JSON API, container image, Hugging Face Space | Built. `lecturelens serve` runs it on any index. |
+| Web app: search page, player, JSON API, container image, Hugging Face Space | Built. `slideseek serve` runs it on any index. |
 | Course for the public demo | Chosen and indexed locally: five lectures of MIT 6.7960 Deep Learning (Fall 2024), 6.5 hours, 678 moments. |
 | **Benchmark results on real lectures** | **Not yet.** The queries, slide transitions and transcript excerpts still have to be annotated by hand. No numbers are claimed until then. |
-| Hosted demo | **Live** at <https://lakshyasakhuja-lecturelens.hf.space>, a free Hugging Face Space on ZeroGPU, put there by `lecturelens deploy`. Search works; reranking on a GPU is switched off there because it fails on ZeroGPU ([what was found](deploy/README.md#what-the-first-deployment-showed)). |
+| Hosted demo | **Live** at <https://lakshyasakhuja-slideseek.hf.space>, a free Hugging Face Space on ZeroGPU, put there by `slideseek deploy`. Search works; reranking on a GPU is switched off there because it fails on ZeroGPU ([what was found](deploy/README.md#what-the-first-deployment-showed)). |
 
 More than 260 unit tests run in CI on every push, with no model downloads. A further integration test (`pytest -m models`) runs the whole system with the real models on synthetic lectures.
 
@@ -57,28 +59,28 @@ Keyword search over a transcript helps only when you remember the exact words th
 
 ## Try it in five minutes
 
-No lecture videos needed: `lecturelens demo` generates two short synthetic lectures (rendered slides, a text-to-speech voice) with ground truth for every stage.
+No lecture videos needed: `slideseek demo` generates two short synthetic lectures (rendered slides, a text-to-speech voice) with ground truth for every stage.
 
 Requirements: Python 3.10 to 3.12, [`uv`](https://docs.astral.sh/uv/), `ffmpeg`, and for the demo a text-to-speech command (`say` on macOS, `espeak-ng` on Linux). The first run downloads about 5 GB of model weights.
 
 ```bash
-git clone https://github.com/lakshyasakhuja/lecturelens.git
+git clone https://github.com/lakshyasakhuja/slideseek.git
 ```
 
 ```bash
-cd lecturelens && uv sync --extra index --extra eval
+cd slideseek && uv sync --extra index --extra eval
 ```
 
 ```bash
-uv run lecturelens demo demo
+uv run slideseek demo demo
 ```
 
 ```bash
-uv run lecturelens index demo/videos --catalog demo/lectures.csv --out demo/index --work demo/work
+uv run slideseek index demo/videos --catalog demo/lectures.csv --out demo/index --work demo/work
 ```
 
 ```bash
-uv run lecturelens search "why do we hold out data we never train on" --index demo/index
+uv run slideseek search "why do we hold out data we never train on" --index demo/index
 ```
 
 On an Apple M4 laptop with no GPU, once the models are downloaded, indexing the three minutes of demo video takes about 90 seconds, and a query takes about 100 ms including both query encoders.
@@ -88,11 +90,11 @@ On an Apple M4 laptop with no GPU, once the models are downloaded, indexing the 
 Put one video per lecture in a folder and index it. Everything stays on your machine: nothing is uploaded, and results link back to the local files.
 
 ```bash
-uv run lecturelens index ~/lectures/comp5318 --out ~/lectures/comp5318-index --work ~/lectures/comp5318-work
+uv run slideseek index ~/lectures/comp5318 --out ~/lectures/comp5318-index --work ~/lectures/comp5318-work
 ```
 
 ```bash
-uv run lecturelens search "what is the kernel trick" --index ~/lectures/comp5318-index
+uv run slideseek search "what is the kernel trick" --index ~/lectures/comp5318-index
 ```
 
 University recordings and slides belong to the institution and its lecturers. Index them for personal study only; do not publish the index.
@@ -104,7 +106,7 @@ uv sync --extra index --extra web
 ```
 
 ```bash
-uv run lecturelens serve --index index
+uv run slideseek serve --index index
 ```
 
 This opens the search page at `http://127.0.0.1:7860`. Add `--videos <folder>` and results play your local recordings inside the page instead of linking out.
@@ -121,14 +123,14 @@ The same app runs as a free Hugging Face Space. The Space's app can also offer a
 
 | Command | What it does |
 |---|---|
-| `lecturelens index <videos>` | Build or update an index. Cached per stage, so it resumes after an interruption and only processes new lectures. |
-| `lecturelens serve` | The web app, for any index. |
-| `lecturelens search "<query>"` | Top moments with timestamps, snippets, badges and links. `--picture <file>` to search with a picture of a slide instead, `--lecture` to filter, `--rerank` for the cross-encoder, `--json` for scripts. |
-| `lecturelens info` | What an index contains and which models built it. |
-| `lecturelens slides <video> --sheet out.jpg` | Run slide detection alone and write a contact sheet of keyframes, to check masks and thresholds before indexing. |
-| `lecturelens push / pull <repo>` | Publish or fetch an index as a Hugging Face dataset, with an attribution card. |
-| `lecturelens deploy <space> --index-repo <repo>` | Create or update the Hugging Face Space that serves a published index. |
-| `lecturelens demo <dir>` | Generate the synthetic lectures. |
+| `slideseek index <videos>` | Build or update an index. Cached per stage, so it resumes after an interruption and only processes new lectures. |
+| `slideseek serve` | The web app, for any index. |
+| `slideseek search "<query>"` | Top moments with timestamps, snippets, badges and links. `--picture <file>` to search with a picture of a slide instead, `--lecture` to filter, `--rerank` for the cross-encoder, `--json` for scripts. |
+| `slideseek info` | What an index contains and which models built it. |
+| `slideseek slides <video> --sheet out.jpg` | Run slide detection alone and write a contact sheet of keyframes, to check masks and thresholds before indexing. |
+| `slideseek push / pull <repo>` | Publish or fetch an index as a Hugging Face dataset, with an attribution card. |
+| `slideseek deploy <space> --index-repo <repo>` | Create or update the Hugging Face Space that serves a published index. |
+| `slideseek demo <dir>` | Generate the synthetic lectures. |
 
 ---
 
@@ -341,9 +343,9 @@ Retrieval metrics are omitted on purpose: with 13 moments nearly everything is i
 
 ## Data and licensing
 
-- **Public demo.** Built on five lectures of [MIT 6.7960 Deep Learning, Fall 2024](https://ocw.mit.edu/courses/6-7960-deep-learning-fall-2024/) by Phillip Isola, Sara Beery and Jeremy Bernstein, from MIT OpenCourseWare, licensed CC BY-NC-SA 4.0. Lectures 4, 6, 8, 9 and 12 were chosen because evenly spaced frames from the official files show typeset slides for 75 to 100 percent of each. The source page, licence and instructors of every lecture are recorded in `config/lectures.csv`. Derived transcripts, slide text and thumbnails are shared under the same licence, for non-commercial use, with that credit. `lecturelens push` generates the attribution card from the index itself. LectureLens is not affiliated with or endorsed by MIT.
+- **Public demo.** Built on five lectures of [MIT 6.7960 Deep Learning, Fall 2024](https://ocw.mit.edu/courses/6-7960-deep-learning-fall-2024/) by Phillip Isola, Sara Beery and Jeremy Bernstein, from MIT OpenCourseWare, licensed CC BY-NC-SA 4.0. Lectures 4, 6, 8, 9 and 12 were chosen because evenly spaced frames from the official files show typeset slides for 75 to 100 percent of each. The source page, licence and instructors of every lecture are recorded in `config/lectures.csv`. Derived transcripts, slide text and thumbnails are shared under the same licence, for non-commercial use, with that credit. `slideseek push` generates the attribution card from the index itself. Slideseek is not affiliated with or endorsed by MIT.
 - **Your own lectures.** Indexed locally, for personal study, and never uploaded, hosted or committed here. `.gitignore` excludes video, audio, work directories and indexes.
-- **This repository** contains code, and one picture: the example photo of a slide behind the page's "Try it" button, a frame of lecture 6 under CC BY-NC-SA 4.0, credited in [`samples/README.txt`](lecturelens/web/static/samples/README.txt). No lecture video, transcript or other slide is included; the screenshot above shows the synthetic demo lectures.
+- **This repository** contains code, and one picture: the example photo of a slide behind the page's "Try it" button, a frame of lecture 6 under CC BY-NC-SA 4.0, credited in [`samples/README.txt`](slideseek/web/static/samples/README.txt). No lecture video, transcript or other slide is included; the screenshot above shows the synthetic demo lectures.
 
 ## Related work
 
@@ -360,7 +362,7 @@ Lecture search already exists, and so do apps that write about lectures. Slidese
 ## Repository layout
 
 ```
-lecturelens/
+slideseek/
   ingest.py       ffmpeg: audio, detection frames, keyframe stills
   slides.py       slide segmentation
   ocr.py          PP-OCRv5, reading order, fragment joining
@@ -416,7 +418,7 @@ The unit tests replace the four models with deterministic stand-ins and synthesi
 uv sync --extra index --extra eval && uv run pytest -m models
 ```
 
-**macOS note.** If the repository lives in an iCloud-synced folder (Desktop or Documents), macOS marks dot-folders such as `.venv` as hidden, and Python 3.12 ignores the hidden file that makes an editable install importable. The symptom is `ModuleNotFoundError: No module named 'lecturelens'` from `uv run lecturelens`. Two ways round it: run the module form from the repository root, `uv run python -m lecturelens …`, which needs no install; or add `export UV_NO_EDITABLE=1` to your shell profile so that uv installs the package as ordinary files (it must be set for every uv command, because a later `uv run` without it switches back).
+**macOS note.** If the repository lives in an iCloud-synced folder (Desktop or Documents), macOS marks dot-folders such as `.venv` as hidden, and Python 3.12 ignores the hidden file that makes an editable install importable. The symptom is `ModuleNotFoundError: No module named 'slideseek'` from `uv run slideseek`. Two ways round it: run the module form from the repository root, `uv run python -m slideseek …`, which needs no install; or add `export UV_NO_EDITABLE=1` to your shell profile so that uv installs the package as ordinary files (it must be set for every uv command, because a later `uv run` without it switches back).
 
 ## Roadmap
 

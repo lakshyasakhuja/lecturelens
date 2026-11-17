@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from lecturelens.search import dedupe, make_snippet, ranks_from_order, rrf
-from lecturelens.text import analyze
+from slideseek.search import dedupe, make_snippet, ranks_from_order, rrf
+from slideseek.text import analyze
 
 # ---- rrf -------------------------------------------------------------------------------
 

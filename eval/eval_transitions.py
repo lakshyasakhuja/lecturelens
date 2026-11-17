@@ -12,7 +12,7 @@ video player; a prediction within the tolerance (2 s by default) of an annotatio
 
 Compared detectors:
 
-* the LectureLens detector, with default thresholds
+* the Slideseek detector, with default thresholds
 * the same with thresholds tuned on one lecture (``--tune-on``); its scores on the *other*
   lectures are the ones to report, since the tuning lecture has been seen
 * two ablations of it: plain mean absolute difference, and 1 - SSIM
@@ -32,12 +32,12 @@ from typing import Any
 import typer
 from rich.console import Console
 
-from lecturelens import ingest
-from lecturelens.catalog import discover_videos
-from lecturelens.logs import configure_logging
-from lecturelens.metrics import TransitionScore, match_transitions
-from lecturelens.slides import SlideConfig, SlideDetector, load_slide_config
-from lecturelens.utils import parse_timestamp, read_json, write_json
+from slideseek import ingest
+from slideseek.catalog import discover_videos
+from slideseek.logs import configure_logging
+from slideseek.metrics import TransitionScore, match_transitions
+from slideseek.slides import SlideConfig, SlideDetector, load_slide_config
+from slideseek.utils import parse_timestamp, read_json, write_json
 
 console = Console()
 configure_logging(console)
@@ -196,12 +196,12 @@ def main(
         def score(transitions, annotated=annotated):
             return match_transitions(transitions, annotated, tolerance)
 
-        rows.append(row("LectureLens", lecture_id, score(detector.detect().transitions)))
+        rows.append(row("Slideseek", lecture_id, score(detector.detect().transitions)))
         if tuned:
             note = "tuning lecture" if lecture_id == tune_on else "held out"
             rows.append(
                 row(
-                    "LectureLens, tuned",
+                    "Slideseek, tuned",
                     lecture_id,
                     score(detector.detect(**tuned).transitions),
                     note,

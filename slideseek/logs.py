@@ -21,7 +21,7 @@ _NOISY = (
 
 
 def configure_logging(console: Console | None = None, verbose: bool = False) -> None:
-    """Show LectureLens's own progress; keep third-party libraries quiet unless asked.
+    """Show Slideseek's own progress; keep third-party libraries quiet unless asked.
 
     Call this before anything imports transformers or huggingface_hub: several of the
     switches are environment variables those libraries read once, at import.
@@ -40,7 +40,7 @@ def configure_logging(console: Console | None = None, verbose: bool = False) -> 
         ],
         force=True,
     )
-    logging.getLogger("lecturelens").setLevel(logging.DEBUG if verbose else logging.INFO)
+    logging.getLogger("slideseek").setLevel(logging.DEBUG if verbose else logging.INFO)
     for name in _NOISY:
         logging.getLogger(name).setLevel(logging.INFO if verbose else logging.ERROR)
     # torch logs a note about stream redirection on every import on macOS, through its own

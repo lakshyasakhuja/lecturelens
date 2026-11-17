@@ -15,8 +15,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from lecturelens.index import Index
-from lecturelens.utils import format_timestamp
+from slideseek.index import Index
+from slideseek.utils import format_timestamp
 
 # Licence strings as people write them -> identifiers the Hub recognises.
 _HUB_LICENCES = {
@@ -39,7 +39,7 @@ def hub_licence(index: Index) -> str:
 
 
 def dataset_card(
-    index: Index, code_url: str = "https://github.com/lakshyasakhuja/lecturelens"
+    index: Index, code_url: str = "https://github.com/lakshyasakhuja/slideseek"
 ) -> str:
     """A README for the dataset repository: what the index is, and whose lectures it covers."""
     manifest = index.manifest
@@ -50,18 +50,18 @@ def dataset_card(
         "language:",
         "- en",
         "tags:",
-        "- lecturelens",
+        "- slideseek",
         "- retrieval",
         "- multimodal",
-        "pretty_name: LectureLens search index",
+        "pretty_name: Slideseek search index",
         "---",
         "",
-        "# LectureLens search index",
+        "# Slideseek search index",
         "",
         f"A prebuilt search index over {len(index.lectures)} lecture recording(s): "
         f"{len(index)} moments, {len(index.image)} slide keyframes, "
         f"{format_timestamp(manifest.get('total_duration_s', 0))} of video. "
-        f"Built and read by [LectureLens]({code_url}).",
+        f"Built and read by [Slideseek]({code_url}).",
         "",
         "It contains **derived data only**: machine transcripts, slide text read by OCR, slide "
         "thumbnails and embeddings. It does not contain the lecture videos. Each result links "
@@ -90,8 +90,8 @@ def dataset_card(
         f"- Slide text: {models.get('ocr', '?')}",
         f"- Text embeddings: `{models.get('text', '?')}`",
         f"- Image embeddings: `{models.get('image', '?')}`",
-        f"- Built: {manifest.get('created_utc', '?')} with LectureLens "
-        f"{manifest.get('lecturelens_version', '?')} (index format {manifest.get('format', '?')})",
+        f"- Built: {manifest.get('created_utc', '?')} with Slideseek "
+        f"{manifest.get('slideseek_version') or manifest.get('lecturelens_version', '?')} (index format {manifest.get('format', '?')})",
         "",
         "## Files",
         "",
@@ -170,7 +170,7 @@ def stage_space(dest: str | Path, root: str | Path = ".") -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(
         Path(__file__).parent,
-        dest / "lecturelens",
+        dest / "slideseek",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".*"),
         dirs_exist_ok=True,
     )
@@ -213,15 +213,15 @@ def push_space(
         private=private,
         exist_ok=True,
     )
-    api.add_space_variable(repo_id, "LECTURELENS_INDEX_REPO", index_repo)
+    api.add_space_variable(repo_id, "SLIDESEEK_INDEX_REPO", index_repo)
     with tempfile.TemporaryDirectory() as staging:
         stage_space(staging, root)
         api.upload_folder(
             folder_path=staging,
             repo_id=repo_id,
             repo_type="space",
-            commit_message="Deploy LectureLens",
+            commit_message="Deploy Slideseek",
             # Files removed from the package should not linger in the Space.
-            delete_patterns=["lecturelens/**", "config/**", "results/**"],
+            delete_patterns=["slideseek/**", "config/**", "results/**"],
         )
     return f"https://huggingface.co/spaces/{repo_id}"

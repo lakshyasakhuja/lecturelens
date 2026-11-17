@@ -15,10 +15,10 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from lecturelens.catalog import Lecture
-from lecturelens.index import Index
-from lecturelens.moments import moment_text
-from lecturelens.text import analyze
+from slideseek.catalog import Lecture
+from slideseek.index import Index
+from slideseek.moments import moment_text
+from slideseek.text import analyze
 
 DIM = 4096  # large enough that two different stems practically never share a bucket
 
@@ -267,7 +267,7 @@ class FakeOcr:
     def read(self, image_path):
         from pathlib import Path
 
-        from lecturelens.ocr import OcrLine, SlideText
+        from slideseek.ocr import OcrLine, SlideText
 
         self.calls += 1
         seconds = int(Path(image_path).stem) // 1000

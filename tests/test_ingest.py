@@ -9,8 +9,8 @@ import pytest
 import synthetic as syn
 from PIL import Image
 
-from lecturelens import ingest
-from lecturelens.slides import detect_slides
+from slideseek import ingest
+from slideseek.slides import detect_slides
 
 pytestmark = pytest.mark.ffmpeg
 

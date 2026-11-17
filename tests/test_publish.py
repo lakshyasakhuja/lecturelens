@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from fakes import make_index
 
-from lecturelens.publish import (
+from slideseek.publish import (
     dataset_card,
     hub_licence,
     pull_index,
@@ -150,17 +150,17 @@ def test_staged_space_holds_the_app_and_nothing_it_should_not(tmp_path):
     files = {path.relative_to(staged).as_posix() for path in staged.rglob("*") if path.is_file()}
     assert {"README.md", "app.py", "requirements.txt", "config/examples.json"} <= files
     assert {
-        "lecturelens/__init__.py",
-        "lecturelens/web/space.py",
-        "lecturelens/web/static/index.html",
-        "lecturelens/web/static/vendor/gradio-client.js",
+        "slideseek/__init__.py",
+        "slideseek/web/space.py",
+        "slideseek/web/static/index.html",
+        "slideseek/web/static/vendor/gradio-client.js",
     } <= files
-    assert (staged / "README.md").read_text().startswith("---\ntitle: LectureLens\n")
+    assert (staged / "README.md").read_text().startswith("---\ntitle: Slideseek\n")
     assert "sdk: gradio" in (staged / "README.md").read_text()
 
     # No recordings, no index and no caches. The one binary file is the page's example
     # photo of a slide, which the Hub API uploads like any other file; it must stay small.
-    sample = "lecturelens/web/static/samples/slide-photo.jpg"
+    sample = "slideseek/web/static/samples/slide-photo.jpg"
     assert sample in files and (staged / sample).stat().st_size < 100_000
     media = {".mp4", ".mkv", ".mov", ".webm", ".wav", ".npy", ".parquet", ".jpg", ".png", ".pyc"}
     assert not [name for name in files if Path(name).suffix.lower() in media and name != sample]
@@ -178,14 +178,14 @@ def test_push_space_creates_a_zerogpu_gradio_space_and_points_it_at_the_index(mo
     calls = []
     _fake_hub(monkeypatch, calls)
 
-    url = push_space("someone/lecturelens", "someone/lectures-index", root=ROOT, token="t0k3n")
+    url = push_space("someone/slideseek", "someone/lectures-index", root=ROOT, token="t0k3n")
 
-    assert url == "https://huggingface.co/spaces/someone/lecturelens"
+    assert url == "https://huggingface.co/spaces/someone/slideseek"
     names = [call[0] for call in calls]
     assert names == ["init", "repo_info", "create_repo", "add_space_variable", "upload_folder"]
     assert calls[1][1:] == ("someone/lectures-index", {"repo_type": "dataset"})
     assert calls[2][1:] == (
-        "someone/lecturelens",
+        "someone/slideseek",
         {
             "repo_type": "space",
             "space_sdk": "gradio",
@@ -195,13 +195,13 @@ def test_push_space_creates_a_zerogpu_gradio_space_and_points_it_at_the_index(mo
         },
     )
     assert calls[3][1:] == (
-        "someone/lecturelens",
-        "LECTURELENS_INDEX_REPO",
+        "someone/slideseek",
+        "SLIDESEEK_INDEX_REPO",
         "someone/lectures-index",
     )
     upload = calls[4][1]
-    assert upload["repo_type"] == "space" and upload["repo_id"] == "someone/lecturelens"
-    assert {"app.py", "requirements.txt", "README.md", "lecturelens/web/space.py"} <= set(
+    assert upload["repo_type"] == "space" and upload["repo_id"] == "someone/slideseek"
+    assert {"app.py", "requirements.txt", "README.md", "slideseek/web/space.py"} <= set(
         upload["files"]
     )
 
@@ -210,5 +210,5 @@ def test_push_space_stops_before_creating_anything_if_the_index_is_not_published
     calls = []
     _fake_hub(monkeypatch, calls)
     with pytest.raises(RuntimeError, match="no such repository"):
-        push_space("someone/lecturelens", "someone/missing", root=ROOT)
+        push_space("someone/slideseek", "someone/missing", root=ROOT)
     assert [call[0] for call in calls] == ["init", "repo_info"]

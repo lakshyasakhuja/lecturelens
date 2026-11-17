@@ -17,15 +17,15 @@ import shutil
 
 import pytest
 
-from lecturelens import metrics
-from lecturelens.asr import iter_words, load_segments
-from lecturelens.catalog import discover_videos, load_catalog, resolve_lectures
-from lecturelens.demo import make_demo
-from lecturelens.evaluation import ABLATION, Evaluator, load_queries
-from lecturelens.index import Index
-from lecturelens.pipeline import Indexer, PipelineConfig
-from lecturelens.search import Searcher
-from lecturelens.utils import read_json
+from slideseek import metrics
+from slideseek.asr import iter_words, load_segments
+from slideseek.catalog import discover_videos, load_catalog, resolve_lectures
+from slideseek.demo import make_demo
+from slideseek.evaluation import ABLATION, Evaluator, load_queries
+from slideseek.index import Index
+from slideseek.pipeline import Indexer, PipelineConfig
+from slideseek.search import Searcher
+from slideseek.utils import read_json
 
 pytestmark = [pytest.mark.models, pytest.mark.ffmpeg]
 

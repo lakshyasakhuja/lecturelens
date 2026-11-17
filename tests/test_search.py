@@ -7,8 +7,8 @@ import pandas as pd
 import pytest
 from fakes import DIM, FakeImageEmbedder, FakeTextEmbedder, make_index
 
-from lecturelens.index import Index, InvalidIndex
-from lecturelens.search import SearchConfig, Searcher
+from slideseek.index import Index, InvalidIndex
+from slideseek.search import SearchConfig, Searcher
 
 
 @pytest.fixture()

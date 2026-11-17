@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from lecturelens.catalog import (
+from slideseek.catalog import (
     CatalogError,
     Lecture,
     discover_videos,
@@ -10,7 +10,7 @@ from lecturelens.catalog import (
     resolve_lectures,
     slugify,
 )
-from lecturelens.utils import format_timestamp, parse_timestamp
+from slideseek.utils import format_timestamp, parse_timestamp
 
 HEADER = "lecture_id,title,course,instructors,source_url,licence,duration_s,video_link_template\n"
 

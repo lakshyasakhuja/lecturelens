@@ -12,9 +12,9 @@ pytest.importorskip("fastapi", reason="the web extra is not installed")
 from fakes import FakeImageEmbedder, FakePictureOcr, FakeTextEmbedder, make_index, make_picture
 from fastapi.testclient import TestClient
 
-from lecturelens.catalog import Lecture
-from lecturelens.search import Searcher
-from lecturelens.web.server import (
+from slideseek.catalog import Lecture
+from slideseek.search import Searcher
+from slideseek.web.server import (
     MAX_QUERY_CHARS,
     create_app,
     load_benchmark,
@@ -160,7 +160,7 @@ def test_no_match_is_an_empty_result_not_an_error(tmp_path):
 def test_frontend_and_security_headers(client):
     page = client.get("/")
     assert page.status_code == 200
-    assert "LectureLens" in page.text
+    assert "Slideseek" in page.text
     policy = page.headers["content-security-policy"]
     assert "default-src 'self'" in policy
     assert "frame-src https://www.youtube-nocookie.com" in policy
@@ -174,7 +174,7 @@ def test_unknown_paths(client):
     api = client.get("/api/nope")
     assert api.status_code == 404 and api.json() == {"detail": "Not found."}
     page = client.get("/some/page")
-    assert page.status_code == 404 and "LectureLens" in page.text
+    assert page.status_code == 404 and "Slideseek" in page.text
 
 
 def test_thumbnails_are_served_from_the_index_and_nothing_else(tmp_path):
@@ -265,7 +265,7 @@ def test_examples_for_lectures_that_are_not_in_the_index_are_dropped(tmp_path):
 def test_shipped_examples_are_valid_and_name_catalogued_lectures():
     from pathlib import Path
 
-    from lecturelens.catalog import load_catalog
+    from slideseek.catalog import load_catalog
 
     catalog = load_catalog("config/lectures.csv")
     raw = json.loads(Path("config/examples.json").read_text(encoding="utf-8"))
@@ -296,7 +296,7 @@ def test_frontend_obeys_its_own_content_security_policy():
     """The policy forbids inline scripts and inline styles, so the page must use neither."""
     import re
 
-    from lecturelens.web.server import STATIC_DIR
+    from slideseek.web.server import STATIC_DIR
 
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     assert not re.search(r"<script(?![^>]*\bsrc=)[^>]*>", html), "inline <script> would be blocked"
@@ -312,7 +312,7 @@ def test_frontend_obeys_its_own_content_security_policy():
 def test_every_local_asset_the_page_references_exists(client):
     import re
 
-    from lecturelens.web.server import STATIC_DIR
+    from slideseek.web.server import STATIC_DIR
 
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     assets = set(re.findall(r'(?:href|src)="(/[^"#]+)"', html))
@@ -328,7 +328,7 @@ def test_every_local_asset_the_page_references_exists(client):
 def test_page_has_the_hooks_the_script_fills_in():
     import re
 
-    from lecturelens.web.server import STATIC_DIR
+    from slideseek.web.server import STATIC_DIR
 
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
@@ -393,7 +393,7 @@ def test_run_search_reranks_the_fused_candidates():
 
 
 def test_run_search_refuses_what_the_api_refuses():
-    from lecturelens.web.server import BadRequest
+    from slideseek.web.server import BadRequest
 
     run_search = make_app().state.run_search
     for arguments in [("   ",), ("x" * (MAX_QUERY_CHARS + 1),), ("x", 0), ("x", 5, ["nope"])]:
@@ -414,13 +414,13 @@ def test_routes_attach_to_an_existing_application_and_leave_room_for_its_own():
         return {"reached": True}
 
     client = TestClient(host)
-    assert "LectureLens" in client.get("/").text
+    assert "Slideseek" in client.get("/").text
     assert client.get("/api/search", params={"q": "chain rule"}).status_code == 200
     assert client.get("/later").json() == {"reached": True}
 
 
 def test_frontend_files_are_served_one_by_one(client):
-    from lecturelens.web.server import STATIC_DIR
+    from slideseek.web.server import STATIC_DIR
 
     vendored = client.get("/vendor/gradio-client.js")
     assert vendored.status_code == 200 and "javascript" in vendored.headers["content-type"]
@@ -435,7 +435,7 @@ def test_frontend_files_are_served_one_by_one(client):
 
 
 def test_the_script_loads_the_gradio_client_from_this_origin_only():
-    from lecturelens.web.server import STATIC_DIR
+    from slideseek.web.server import STATIC_DIR
 
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
     assert 'import("/vendor/gradio-client.js")' in script
@@ -484,7 +484,7 @@ def test_what_is_not_a_usable_picture_is_refused_clearly(client):
 
 
 def test_a_picture_over_the_size_limit_is_refused(client, monkeypatch):
-    import lecturelens.web.server as server
+    import slideseek.web.server as server
 
     monkeypatch.setattr(server, "MAX_PICTURE_BYTES", 1000)
     reply = post_picture(client, make_picture("x", size=(800, 600)) + b"\0" * 2000)
@@ -496,7 +496,7 @@ def test_an_uploaded_photo_is_turned_upright_and_scaled_down():
 
     from PIL import Image
 
-    from lecturelens.web.server import PICTURE_SIDE, load_picture
+    from slideseek.web.server import PICTURE_SIDE, load_picture
 
     exif = Image.Exif()
     exif[0x0112] = 6  # stored sideways: rotate 90 degrees to show it upright

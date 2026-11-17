@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from lecturelens.text import STOPWORDS
+from slideseek.text import STOPWORDS
 
 
 @dataclass(frozen=True)
@@ -118,7 +118,7 @@ def transcribe(
     hotwords: str | None = None,
 ) -> list[AsrSegment]:
     """Transcribe an audio (or video) file into segments with word timestamps."""
-    from lecturelens.ingest import read_audio
+    from slideseek.ingest import read_audio
 
     config = config or AsrConfig()
     model = model or load_model(config)

@@ -44,11 +44,11 @@ from pathlib import Path
 
 import numpy as np
 
-from lecturelens.embed import EmbedConfig, ImageEmbedder, TextEmbedder
-from lecturelens.index import Index
-from lecturelens.moments import moment_text
-from lecturelens.text import analyze, match_spans
-from lecturelens.utils import format_timestamp
+from slideseek.embed import EmbedConfig, ImageEmbedder, TextEmbedder
+from slideseek.index import Index
+from slideseek.moments import moment_text
+from slideseek.text import analyze, match_spans
+from slideseek.utils import format_timestamp
 
 # Which index data each ranker uses.
 LEXICAL_FIELDS = {
@@ -301,7 +301,7 @@ class Searcher:
     def ocr(self):
         """The OCR engine that reads a picture query. Loads on first use."""
         if self._ocr is None:
-            from lecturelens.ocr import OcrConfig, OcrEngine
+            from slideseek.ocr import OcrConfig, OcrEngine
 
             # The mobile detector: a query is one picture, and a person is waiting for it.
             self._ocr = OcrEngine(OcrConfig(detector="mobile"))
@@ -548,7 +548,7 @@ class Searcher:
     ) -> tuple[list[int], dict[int, float]]:
         """Rescore the head of the fused list with the cross-encoder; the tail is cut off."""
         if self.reranker is None:
-            from lecturelens.rerank import Reranker
+            from slideseek.rerank import Reranker
 
             self.reranker = Reranker(device=self.embed_config.device)
         head = order[: self.config.rerank_depth]

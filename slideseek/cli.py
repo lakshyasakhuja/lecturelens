@@ -1,13 +1,13 @@
 """Command-line interface.
 
-    lecturelens demo   ./demo                 generate two synthetic lectures to try things on
-    lecturelens index  ./videos               build or update the search index
-    lecturelens search "why hold out data"    query it
-    lecturelens serve                         open the search page in a browser
-    lecturelens info                          what is in the index
-    lecturelens slides lec01.mp4              run slide detection alone, to tune masks
-    lecturelens push   user/my-index          publish an index as a Hugging Face dataset
-    lecturelens pull   user/my-index          fetch a published index
+    slideseek demo   ./demo                 generate two synthetic lectures to try things on
+    slideseek index  ./videos               build or update the search index
+    slideseek search "why hold out data"    query it
+    slideseek serve                         open the search page in a browser
+    slideseek info                          what is in the index
+    slideseek slides lec01.mp4              run slide detection alone, to tune masks
+    slideseek push   user/my-index          publish an index as a Hugging Face dataset
+    slideseek pull   user/my-index          fetch a published index
 
 Indexing your own recordings with this CLI keeps everything on your machine: nothing is
 uploaded, and the index links back to the local files.
@@ -24,17 +24,17 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from lecturelens.logs import configure_logging
+from slideseek.logs import configure_logging
 
 app = typer.Typer(
-    name="lecturelens",
-    help="Semantic search for lecture recordings.",
+    name="slideseek",
+    help="Find the moment a slide was shown in a lecture recording, from a question or a picture.",
     no_args_is_help=True,
     add_completion=False,
     pretty_exceptions_show_locals=False,
 )
 console = Console()
-log = logging.getLogger("lecturelens")
+log = logging.getLogger("slideseek")
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -50,7 +50,7 @@ def fail(message: str) -> None:
 
 
 def load_index(path: Path):
-    from lecturelens.index import Index, InvalidIndex
+    from slideseek.index import Index, InvalidIndex
 
     try:
         return Index.load(path)
@@ -95,11 +95,11 @@ def index(
     re-running after adding a lecture, or after an interruption, only does what is missing.
     """
     setup_logging(verbose)
-    from lecturelens.asr import AsrConfig
-    from lecturelens.catalog import CatalogError, discover_videos, load_catalog, resolve_lectures
-    from lecturelens.embed import EmbedConfig
-    from lecturelens.ingest import FfmpegError
-    from lecturelens.pipeline import Indexer, PipelineConfig
+    from slideseek.asr import AsrConfig
+    from slideseek.catalog import CatalogError, discover_videos, load_catalog, resolve_lectures
+    from slideseek.embed import EmbedConfig
+    from slideseek.ingest import FfmpegError
+    from slideseek.pipeline import Indexer, PipelineConfig
 
     catalog = catalog or (
         Path("config/lectures.csv") if Path("config/lectures.csv").is_file() else None
@@ -174,7 +174,7 @@ def search(
 ) -> None:
     """Find the moments that answer a question, or where the slide in a picture was shown."""
     setup_logging()
-    from lecturelens.search import SearchConfig, Searcher
+    from slideseek.search import SearchConfig, Searcher
 
     if (query is None) == (picture is None):
         fail("give either a question or --picture, not both")
@@ -258,7 +258,7 @@ def info(
     index_dir: Path = typer.Option(Path("index"), "--index", "-i", help="Index directory."),
 ) -> None:
     """Show what an index contains and how it was built."""
-    from lecturelens.utils import format_timestamp
+    from slideseek.utils import format_timestamp
 
     loaded = load_index(index_dir)
     manifest = loaded.manifest
@@ -311,10 +311,10 @@ def slides(
     Use this to check masks and thresholds before indexing: the contact sheet shows one
     keyframe per detected slide, so a missed or spurious cut is visible at a glance.
     """
-    from lecturelens import ingest
-    from lecturelens.catalog import slugify
-    from lecturelens.slides import detect_slides, load_slide_config
-    from lecturelens.utils import format_timestamp
+    from slideseek import ingest
+    from slideseek.catalog import slugify
+    from slideseek.slides import detect_slides, load_slide_config
+    from slideseek.utils import format_timestamp
 
     try:
         config = load_slide_config(masks, lecture_id or slugify(video.stem))
@@ -366,8 +366,8 @@ def _contact_sheet(video: Path, segments, out: Path, columns: int = 5, width: in
 
     from PIL import Image, ImageDraw, ImageFont
 
-    from lecturelens import ingest
-    from lecturelens.utils import format_timestamp
+    from slideseek import ingest
+    from slideseek.utils import format_timestamp
 
     with tempfile.TemporaryDirectory() as tmp:
         stills = ingest.extract_stills(
@@ -420,7 +420,7 @@ def serve(
     try:
         import uvicorn
 
-        from lecturelens.web.server import (
+        from slideseek.web.server import (
             create_app,
             load_benchmark,
             load_examples,
@@ -440,7 +440,7 @@ def serve(
         picture_benchmark=load_picture_benchmark("results/screenshot/metrics.json"),
         device=device,
     )
-    console.print(f"LectureLens is at [bold]http://{host}:{port}[/bold]  (Ctrl+C to stop)")
+    console.print(f"Slideseek is at [bold]http://{host}:{port}[/bold]  (Ctrl+C to stop)")
     uvicorn.run(web_app, host=host, port=port, log_level="warning", access_log=False)
 
 
@@ -452,7 +452,7 @@ def serve(
 @app.command()
 def push(
     repo_id: str = typer.Argument(
-        ..., help="Hugging Face dataset repository, e.g. user/lecturelens-index."
+        ..., help="Hugging Face dataset repository, e.g. user/slideseek-index."
     ),
     index_dir: Path = typer.Option(Path("index"), "--index", "-i", help="Index directory."),
     private: bool = typer.Option(False, help="Create the repository as private."),
@@ -463,7 +463,7 @@ def push(
     token from `huggingface-cli login` or the HF_TOKEN environment variable.
     """
     setup_logging()
-    from lecturelens.publish import push_index
+    from slideseek.publish import push_index
 
     load_index(index_dir)  # fail early, with a clear message, if there is nothing to push
     try:
@@ -478,10 +478,10 @@ def pull(
     repo_id: str = typer.Argument(..., help="Hugging Face dataset repository holding an index."),
     index_dir: Path = typer.Option(Path("index"), "--index", "-i", help="Where to put it."),
 ) -> None:
-    """Download a published index, ready for `lecturelens search`."""
+    """Download a published index, ready for `slideseek search`."""
     setup_logging()
-    from lecturelens.index import InvalidIndex
-    from lecturelens.publish import pull_index
+    from slideseek.index import InvalidIndex
+    from slideseek.publish import pull_index
 
     try:
         loaded = pull_index(repo_id, index_dir)
@@ -498,10 +498,10 @@ def pull(
 @app.command()
 def deploy(
     repo_id: str = typer.Argument(
-        ..., help="Hugging Face Space to create or update, e.g. user/lecturelens."
+        ..., help="Hugging Face Space to create or update, e.g. user/slideseek."
     ),
     index_repo: str = typer.Option(
-        ..., "--index-repo", help="Dataset repository holding the index (see `lecturelens push`)."
+        ..., "--index-repo", help="Dataset repository holding the index (see `slideseek push`)."
     ),
     private: bool = typer.Option(False, help="Create the Space as private."),
     hardware: str = typer.Option(
@@ -510,12 +510,12 @@ def deploy(
 ) -> None:
     """Deploy the web app as a Hugging Face Space on ZeroGPU, serving a published index.
 
-    Run it from the root of the repository, after `lecturelens push`. It uploads the app's
+    Run it from the root of the repository, after `slideseek push`. It uploads the app's
     source and nothing else: no video and no index. Uses the token from `hf auth login` or
     the HF_TOKEN environment variable.
     """
     setup_logging()
-    from lecturelens.publish import push_space
+    from slideseek.publish import push_space
 
     try:
         url = push_space(repo_id, index_repo, private=private, hardware=hardware)
@@ -544,7 +544,7 @@ def demo(
 
     Needs ffmpeg and a text-to-speech command (`say` on macOS, `espeak-ng` on Linux).
     """
-    from lecturelens.demo import make_demo
+    from slideseek.demo import make_demo
 
     try:
         make_demo(out)
@@ -552,10 +552,10 @@ def demo(
         fail(str(err))
     console.print(f"Demo lectures written to [bold]{out}[/bold]. Next:")
     console.print(
-        f"  lecturelens index {out}/videos --catalog {out}/lectures.csv --out {out}/index --work {out}/work"
+        f"  slideseek index {out}/videos --catalog {out}/lectures.csv --out {out}/index --work {out}/work"
     )
     console.print(
-        f'  lecturelens search "why do we hold out data we never train on" --index {out}/index'
+        f'  slideseek search "why do we hold out data we never train on" --index {out}/index'
     )
 
 

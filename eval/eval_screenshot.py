@@ -31,9 +31,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 
-from lecturelens.index import Index
-from lecturelens.ingest import extract_still
-from lecturelens.search import Searcher
+from slideseek.index import Index
+from slideseek.ingest import extract_still
+from slideseek.search import Searcher
 
 VARIANTS = ("frame", "photo", "crop")
 METHODS = ("image", "ocr", "both")

@@ -1215,123 +1215,6 @@ wheels = [
 ]
 
 [[package]]
-name = "lecturelens"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "bm25s" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pandas", version = "3.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pillow", version = "12.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pillow", version = "13.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pyarrow", version = "25.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "pyarrow", version = "26.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pystemmer" },
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "typer" },
-]
-
-[package.optional-dependencies]
-eval = [
-    { name = "jiwer" },
-    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "matplotlib", version = "3.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "scenedetect" },
-]
-index = [
-    { name = "faster-whisper" },
-    { name = "onnxruntime", version = "1.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "onnxruntime", version = "1.32.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "protobuf" },
-    { name = "rapidocr" },
-    { name = "sentence-transformers" },
-    { name = "sentencepiece" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "transformers", version = "5.20.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "transformers", version = "5.23.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-models = [
-    { name = "protobuf" },
-    { name = "sentence-transformers" },
-    { name = "sentencepiece" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "transformers", version = "5.20.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "transformers", version = "5.23.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-ocr = [
-    { name = "onnxruntime", version = "1.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "onnxruntime", version = "1.32.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "rapidocr" },
-]
-space = [
-    { name = "fastapi", version = "0.162.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "fastapi", version = "0.163.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "gradio" },
-    { name = "spaces" },
-    { name = "uvicorn" },
-]
-web = [
-    { name = "fastapi", version = "0.162.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "fastapi", version = "0.163.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "uvicorn" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "bm25s", specifier = ">=0.2" },
-    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115" },
-    { name = "faster-whisper", marker = "extra == 'index'", specifier = ">=1.1" },
-    { name = "gradio", marker = "extra == 'space'", specifier = ">=6.32,<7" },
-    { name = "jiwer", marker = "extra == 'eval'", specifier = ">=3" },
-    { name = "lecturelens", extras = ["models", "ocr"], marker = "extra == 'index'" },
-    { name = "lecturelens", extras = ["web"], marker = "extra == 'space'" },
-    { name = "matplotlib", marker = "extra == 'eval'", specifier = ">=3.8" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "onnxruntime", marker = "extra == 'ocr'", specifier = ">=1.19" },
-    { name = "pandas", specifier = ">=2.2" },
-    { name = "pillow", specifier = ">=10.1" },
-    { name = "protobuf", marker = "extra == 'models'", specifier = ">=4" },
-    { name = "pyarrow", specifier = ">=16" },
-    { name = "pystemmer", specifier = ">=2.2" },
-    { name = "pyyaml", specifier = ">=6" },
-    { name = "rapidocr", marker = "extra == 'ocr'", specifier = ">=3.2" },
-    { name = "rich", specifier = ">=13" },
-    { name = "scenedetect", marker = "extra == 'eval'", specifier = ">=0.6.4" },
-    { name = "scipy", specifier = ">=1.11" },
-    { name = "sentence-transformers", marker = "extra == 'models'", specifier = ">=5.0" },
-    { name = "sentencepiece", marker = "extra == 'models'", specifier = ">=0.2" },
-    { name = "spaces", marker = "extra == 'space'", specifier = ">=0.52" },
-    { name = "torch", marker = "extra == 'models'", specifier = ">=2.4" },
-    { name = "transformers", marker = "extra == 'models'", specifier = ">=5.0" },
-    { name = "typer", specifier = ">=0.12" },
-    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.30" },
-]
-provides-extras = ["models", "ocr", "index", "web", "space", "eval"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "ruff", specifier = ">=0.6" },
-]
-
-[[package]]
 name = "markdown-it-py"
 version = "4.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3466,6 +3349,123 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "slideseek"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "bm25s" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pandas", version = "3.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pillow", version = "12.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pillow", version = "13.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pyarrow", version = "25.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "pyarrow", version = "26.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pystemmer" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+eval = [
+    { name = "jiwer" },
+    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "matplotlib", version = "3.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scenedetect" },
+]
+index = [
+    { name = "faster-whisper" },
+    { name = "onnxruntime", version = "1.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "onnxruntime", version = "1.32.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "protobuf" },
+    { name = "rapidocr" },
+    { name = "sentence-transformers" },
+    { name = "sentencepiece" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "transformers", version = "5.20.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "transformers", version = "5.23.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+models = [
+    { name = "protobuf" },
+    { name = "sentence-transformers" },
+    { name = "sentencepiece" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "transformers", version = "5.20.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "transformers", version = "5.23.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+ocr = [
+    { name = "onnxruntime", version = "1.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "onnxruntime", version = "1.32.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "rapidocr" },
+]
+space = [
+    { name = "fastapi", version = "0.162.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "fastapi", version = "0.163.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "gradio" },
+    { name = "spaces" },
+    { name = "uvicorn" },
+]
+web = [
+    { name = "fastapi", version = "0.162.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "fastapi", version = "0.163.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "uvicorn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bm25s", specifier = ">=0.2" },
+    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.115" },
+    { name = "faster-whisper", marker = "extra == 'index'", specifier = ">=1.1" },
+    { name = "gradio", marker = "extra == 'space'", specifier = ">=6.32,<7" },
+    { name = "jiwer", marker = "extra == 'eval'", specifier = ">=3" },
+    { name = "matplotlib", marker = "extra == 'eval'", specifier = ">=3.8" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "onnxruntime", marker = "extra == 'ocr'", specifier = ">=1.19" },
+    { name = "pandas", specifier = ">=2.2" },
+    { name = "pillow", specifier = ">=10.1" },
+    { name = "protobuf", marker = "extra == 'models'", specifier = ">=4" },
+    { name = "pyarrow", specifier = ">=16" },
+    { name = "pystemmer", specifier = ">=2.2" },
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "rapidocr", marker = "extra == 'ocr'", specifier = ">=3.2" },
+    { name = "rich", specifier = ">=13" },
+    { name = "scenedetect", marker = "extra == 'eval'", specifier = ">=0.6.4" },
+    { name = "scipy", specifier = ">=1.11" },
+    { name = "sentence-transformers", marker = "extra == 'models'", specifier = ">=5.0" },
+    { name = "sentencepiece", marker = "extra == 'models'", specifier = ">=0.2" },
+    { name = "slideseek", extras = ["models", "ocr"], marker = "extra == 'index'" },
+    { name = "slideseek", extras = ["web"], marker = "extra == 'space'" },
+    { name = "spaces", marker = "extra == 'space'", specifier = ">=0.52" },
+    { name = "torch", marker = "extra == 'models'", specifier = ">=2.4" },
+    { name = "transformers", marker = "extra == 'models'", specifier = ">=5.0" },
+    { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.30" },
+]
+provides-extras = ["models", "ocr", "index", "web", "space", "eval"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.6" },
 ]
 
 [[package]]

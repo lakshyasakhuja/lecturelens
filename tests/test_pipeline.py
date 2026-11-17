@@ -13,12 +13,12 @@ import numpy as np
 import pytest
 from fakes import FakeIndexImageEmbedder, FakeIndexTextEmbedder, FakeOcr, FakeWhisper
 
-from lecturelens.catalog import Lecture
-from lecturelens.embed import EmbedConfig
-from lecturelens.index import Index
-from lecturelens.pipeline import Indexer, PipelineConfig, StageCache, fingerprint
-from lecturelens.slides import SlideConfig
-from lecturelens.utils import read_json
+from slideseek.catalog import Lecture
+from slideseek.embed import EmbedConfig
+from slideseek.index import Index
+from slideseek.pipeline import Indexer, PipelineConfig, StageCache, fingerprint
+from slideseek.slides import SlideConfig
+from slideseek.utils import read_json
 
 
 def make_indexer(work, config=None):

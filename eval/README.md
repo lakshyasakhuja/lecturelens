@@ -14,8 +14,8 @@ To see all three run before any annotation exists, generate the synthetic demo l
 They come with ground truth in exactly these formats:
 
 ```bash
-lecturelens demo demo
-lecturelens index demo/videos --catalog demo/lectures.csv --out demo/index --work demo/work
+slideseek demo demo
+slideseek index demo/videos --catalog demo/lectures.csv --out demo/index --work demo/work
 python eval/evaluate.py --index demo/index --queries demo/eval/queries.jsonl --split all --out demo/results
 python eval/eval_transitions.py --videos demo/videos --annotations demo/eval/transitions --out demo/results
 python eval/eval_asr.py --work demo/work --refs demo/eval/asr_ref --out demo/results

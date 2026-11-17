@@ -30,11 +30,11 @@ from typing import Any
 import typer
 from rich.console import Console
 
-from lecturelens import asr, ingest
-from lecturelens.logs import configure_logging
-from lecturelens.metrics import WerScore, word_errors
-from lecturelens.ocr import SlideText
-from lecturelens.utils import format_timestamp, parse_timestamp, read_json, write_json
+from slideseek import asr, ingest
+from slideseek.logs import configure_logging
+from slideseek.metrics import WerScore, word_errors
+from slideseek.ocr import SlideText
+from slideseek.utils import format_timestamp, parse_timestamp, read_json, write_json
 
 console = Console()
 configure_logging(console)
@@ -119,7 +119,7 @@ def render(rows: list[dict[str, Any]], totals: dict[str, WerScore], model: str) 
 
 
 def main(
-    work: Path = typer.Option(Path("work"), help="Work directory written by `lecturelens index`."),
+    work: Path = typer.Option(Path("work"), help="Work directory written by `slideseek index`."),
     refs: Path = typer.Option(
         Path("eval/asr_ref"), help="Directory with excerpts.jsonl and references."
     ),

@@ -11,7 +11,7 @@ import pytest
 import synthetic as syn
 from fakes import FakeImageEmbedder, FakeTextEmbedder, make_index
 
-from lecturelens.evaluation import (
+from slideseek.evaluation import (
     ABLATION,
     EXTRAS,
     Evaluator,
@@ -26,8 +26,8 @@ from lecturelens.evaluation import (
     tune,
     tuned_system,
 )
-from lecturelens.search import Searcher
-from lecturelens.slides import SlideDetector
+from slideseek.search import Searcher
+from slideseek.slides import SlideDetector
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -367,7 +367,7 @@ def test_threshold_tuning_recovers_cuts_that_the_defaults_miss(lecture_frames):
 
 
 def test_asr_excerpts_and_hypothesis_window(tmp_path):
-    from lecturelens.asr import Word
+    from slideseek.asr import Word
 
     script = load_script("eval_asr")
     (tmp_path / "lec02_excerpt.txt").write_text("The corrected transcript.", encoding="utf-8")
@@ -390,7 +390,7 @@ def test_asr_excerpts_and_hypothesis_window(tmp_path):
 
 
 def test_wer_report_pools_totals():
-    from lecturelens.metrics import word_errors
+    from slideseek.metrics import word_errors
 
     script = load_script("eval_asr")
     rows = [

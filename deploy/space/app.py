@@ -2,7 +2,7 @@
 
 import spaces  # noqa: F401  -- first, so ZeroGPU is set up before anything touches CUDA
 
-from lecturelens.web.space import create_space_from_env, launch
+from slideseek.web.space import create_space_from_env, launch
 
 app = create_space_from_env()
 

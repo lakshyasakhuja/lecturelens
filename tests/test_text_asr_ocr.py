@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lecturelens.asr import (
+from slideseek.asr import (
     AsrSegment,
     Word,
     build_hotwords,
@@ -13,8 +13,8 @@ from lecturelens.asr import (
     save_segments,
     words_between,
 )
-from lecturelens.ocr import OcrLine, SlideText, reading_order
-from lecturelens.text import analyze, match_spans, tokenize
+from slideseek.ocr import OcrLine, SlideText, reading_order
+from slideseek.text import analyze, match_spans, tokenize
 
 # ---- text ------------------------------------------------------------------------------
 

@@ -35,11 +35,11 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from lecturelens import __version__
-from lecturelens.catalog import VIDEO_EXTENSIONS, Lecture
-from lecturelens.index import Index
-from lecturelens.search import PICTURE_RANKERS, Result, Searcher
-from lecturelens.utils import format_timestamp, read_json
+from slideseek import __version__
+from slideseek.catalog import VIDEO_EXTENSIONS, Lecture
+from slideseek.index import Index
+from slideseek.search import PICTURE_RANKERS, Result, Searcher
+from slideseek.utils import format_timestamp, read_json
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_QUERY_CHARS = 300
@@ -221,7 +221,7 @@ def create_app(
         ready.set()
 
     if app is None:
-        app = FastAPI(title="LectureLens", version=__version__, docs_url=None, redoc_url=None)
+        app = FastAPI(title="Slideseek", version=__version__, docs_url=None, redoc_url=None)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -301,7 +301,7 @@ def create_app(
             )
         manifest = index.manifest
         return {
-            "name": "LectureLens",
+            "name": "Slideseek",
             "version": __version__,
             "ready": ready.is_set(),
             "n_lectures": len(index.lectures),
@@ -468,46 +468,46 @@ def add_frontend(app: FastAPI) -> None:
 
 
 def load_index_from_env() -> Index:
-    """The index named by ``LECTURELENS_INDEX``, downloaded first if it is not there yet."""
-    index_dir = Path(os.environ.get("LECTURELENS_INDEX", "index"))
-    repo = os.environ.get("LECTURELENS_INDEX_REPO")
+    """The index named by ``SLIDESEEK_INDEX``, downloaded first if it is not there yet."""
+    index_dir = Path(os.environ.get("SLIDESEEK_INDEX", "index"))
+    repo = os.environ.get("SLIDESEEK_INDEX_REPO")
     if repo and not (index_dir / "manifest.json").is_file():
-        from lecturelens.publish import pull_index
+        from slideseek.publish import pull_index
 
         return pull_index(repo, index_dir)
     return Index.load(index_dir)
 
 
 def create_app_from_env() -> FastAPI:
-    """App factory for ``uvicorn lecturelens.web.server:create_app_from_env --factory``.
+    """App factory for ``uvicorn slideseek.web.server:create_app_from_env --factory``.
 
     Configuration comes from the environment, which is how a container is configured:
 
-    ``LECTURELENS_INDEX``       index directory (default ``index``)
-    ``LECTURELENS_INDEX_REPO``  Hugging Face dataset to download the index from if the
+    ``SLIDESEEK_INDEX``       index directory (default ``index``)
+    ``SLIDESEEK_INDEX_REPO``  Hugging Face dataset to download the index from if the
                                 directory has none
-    ``LECTURELENS_VIDEOS``      directory of local recordings to play instead of linking out
-    ``LECTURELENS_EXAMPLES``    example queries (default ``config/examples.json``)
-    ``LECTURELENS_BENCHMARK``   benchmark metrics (default ``results/test/metrics.json``)
-    ``LECTURELENS_PICTURE_BENCHMARK``  picture search metrics
+    ``SLIDESEEK_VIDEOS``      directory of local recordings to play instead of linking out
+    ``SLIDESEEK_EXAMPLES``    example queries (default ``config/examples.json``)
+    ``SLIDESEEK_BENCHMARK``   benchmark metrics (default ``results/test/metrics.json``)
+    ``SLIDESEEK_PICTURE_BENCHMARK``  picture search metrics
                                 (default ``results/screenshot/metrics.json``)
-    ``LECTURELENS_DEVICE``      device for the query encoders (default ``cpu``)
+    ``SLIDESEEK_DEVICE``      device for the query encoders (default ``cpu``)
     """
-    from lecturelens.logs import configure_logging
+    from slideseek.logs import configure_logging
 
     configure_logging()
     index = load_index_from_env()
     return create_app(
         index,
-        videos_dir=os.environ.get("LECTURELENS_VIDEOS") or None,
+        videos_dir=os.environ.get("SLIDESEEK_VIDEOS") or None,
         examples=load_examples(
-            os.environ.get("LECTURELENS_EXAMPLES", "config/examples.json"), index.lectures
+            os.environ.get("SLIDESEEK_EXAMPLES", "config/examples.json"), index.lectures
         ),
         benchmark=load_benchmark(
-            os.environ.get("LECTURELENS_BENCHMARK", "results/test/metrics.json")
+            os.environ.get("SLIDESEEK_BENCHMARK", "results/test/metrics.json")
         ),
         picture_benchmark=load_picture_benchmark(
-            os.environ.get("LECTURELENS_PICTURE_BENCHMARK", "results/screenshot/metrics.json")
+            os.environ.get("SLIDESEEK_PICTURE_BENCHMARK", "results/screenshot/metrics.json")
         ),
-        device=os.environ.get("LECTURELENS_DEVICE", "cpu"),
+        device=os.environ.get("SLIDESEEK_DEVICE", "cpu"),
     )

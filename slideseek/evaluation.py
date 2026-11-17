@@ -29,10 +29,10 @@ from typing import Any
 
 import numpy as np
 
-from lecturelens import metrics
-from lecturelens.index import Index
-from lecturelens.search import QueryEncoding, Searcher, dedupe, rrf
-from lecturelens.utils import format_timestamp, parse_timestamp
+from slideseek import metrics
+from slideseek.index import Index
+from slideseek.search import QueryEncoding, Searcher, dedupe, rrf
+from slideseek.utils import format_timestamp, parse_timestamp
 
 QUERY_TYPES = ("keyword", "paraphrase", "spoken", "visual")
 TYPE_LABELS = {

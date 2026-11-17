@@ -1,4 +1,4 @@
-"""LectureLens: semantic search for lecture recordings.
+"""Slideseek: find the moment a slide was shown in a lecture recording.
 
 The package is split along the line that defines the system:
 

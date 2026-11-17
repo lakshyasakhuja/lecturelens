@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from lecturelens.metrics import (
+from slideseek.metrics import (
     bootstrap_ci,
     first_relevant_rank,
     hits_at_k,

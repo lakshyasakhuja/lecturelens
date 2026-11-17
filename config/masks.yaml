@@ -9,7 +9,7 @@
 #         capture. Frames are blurred before comparison so sensor noise and focus hunting do
 #         not look like slide changes.
 #
-# Any field of lecturelens.slides.SlideConfig (t_high, t_low, min_stable_s, ...) can also be
+# Any field of slideseek.slides.SlideConfig (t_high, t_low, min_stable_s, ...) can also be
 # overridden here for one lecture.
 #
 # `defaults` applies to every lecture; an entry under `lectures` overrides it for that id.

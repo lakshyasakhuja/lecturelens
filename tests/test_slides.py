@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import synthetic as syn
 
-from lecturelens.slides import (
+from slideseek.slides import (
     SlideConfig,
     SlideDetector,
     detect_slides,

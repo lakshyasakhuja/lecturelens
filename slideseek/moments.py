@@ -22,9 +22,9 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 
-from lecturelens.asr import Word
-from lecturelens.catalog import Lecture
-from lecturelens.slides import SlideSegment
+from slideseek.asr import Word
+from slideseek.catalog import Lecture
+from slideseek.slides import SlideSegment
 
 
 @dataclass(frozen=True)

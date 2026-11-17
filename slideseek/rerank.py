@@ -19,7 +19,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from lecturelens.embed import resolve_device
+from slideseek.embed import resolve_device
 
 _SYSTEM = (
     "Judge whether the Document meets the requirements based on the Query and the Instruct "

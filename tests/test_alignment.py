@@ -6,16 +6,16 @@ import itertools
 
 import pytest
 
-from lecturelens.asr import Word
-from lecturelens.catalog import Lecture
-from lecturelens.moments import (
+from slideseek.asr import Word
+from slideseek.catalog import Lecture
+from slideseek.moments import (
     MomentConfig,
     build_moments,
     moment_text,
     plan_windows,
     transcript_between,
 )
-from lecturelens.slides import SlideSegment
+from slideseek.slides import SlideSegment
 
 LECTURE = Lecture("lec01", "Test lecture", video_link_template="https://v.example/?t={seconds}")
 
