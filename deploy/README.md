@@ -19,6 +19,8 @@ uv run slideseek serve --index index
 ```
 
 Add `--videos videos` to play your own recordings in the page instead of linking out.
+Searching needs an account: sign up on the page the first time. Accounts are kept in
+`accounts.db` in the folder the server runs from, which git ignores; see [Accounts](#accounts).
 
 ## On Hugging Face Spaces, free
 
@@ -28,7 +30,9 @@ runs Gradio apps only, so on a Space the app is served by Gradio's server mode
 (`gradio.Server`): a FastAPI application with Gradio's queue attached. The page, the JSON
 API and the search itself are exactly the ones `slideseek serve` runs.
 
-- **Searching** runs on the Space's CPU and costs a visitor nothing.
+- **Searching** runs on the Space's CPU and costs a visitor nothing, once they have an
+  account. A Space's disk does not last, so the accounts need a database of their own:
+  see [Accounts](#accounts).
 - **"Rerank on a GPU"** is built but switched off, because on ZeroGPU it does not work yet;
   [what was found](#what-the-first-deployment-showed) is below. With
   `SLIDESEEK_RERANK=1` the page shows a switch that rescores the fused top 20 with the
@@ -108,6 +112,49 @@ Searching needs that forward pass, so reranking is off by default rather than of
 broken. The fix to try next is to run the query encoders in a process of their own, so the
 process that ZeroGPU forks its workers from never runs them. It has not been tried.
 
+## Accounts
+
+Every search needs an account. A visitor signs up with their name, a username, an email
+address, a phone number with its country code, and a password, and is signed in by a
+session cookie. What is checked and how it is kept is described in `slideseek/accounts.py`
+and `slideseek/web/auth.py`. In short:
+
+- Usernames and email addresses are unique, ignoring case.
+- A password needs 8 characters, an uppercase letter, a lowercase letter, a number and a
+  special character. It is stored only as a salted Argon2id hash.
+- A phone number is checked for its country and stored in E.164 form (`+61412345678`).
+- A session token is 256 random bits; the database holds only its SHA-256. The cookie is
+  HttpOnly, and over HTTPS `Secure; SameSite=None; Partitioned`, so that signing in works
+  inside the frame huggingface.co shows a Space in. Requests that change something are
+  refused unless they come from the app's own page (`Sec-Fetch-Site`, or `Origin`).
+- Failed sign-ins are limited per address and per account, and sign-ups per address.
+- A visitor can sign out, and can delete their account with its password.
+
+The accounts live in whatever database `SLIDESEEK_DATABASE_URL` names, as a SQLAlchemy URL:
+
+| Where it runs | What to set |
+|---|---|
+| A laptop | Nothing. They go in `accounts.db` where the server runs. |
+| A container | A PostgreSQL URL, or SQLite on a mounted volume (see the `Dockerfile`). |
+| A Hugging Face Space | A database outside the Space: its own disk is wiped every time it restarts or is redeployed, and accounts kept on it go with it. |
+
+A database URL holds a password, so on a Space it goes under *Settings → Variables and
+secrets* as a **secret**, never as a variable: variables are public. URLs that start with
+`postgres://` or `postgresql://`, as hosts hand them out, are read as psycopg URLs.
+
+Two things to know before choosing a database for a Space:
+
+- **Ports.** Hugging Face's forum, including replies from its staff, says a Space can only
+  make outgoing connections on ports 80, 443 and 8080, and that other ports are opened
+  only on request, for one Space at a time. PostgreSQL listens on 5432, so a hosted
+  PostgreSQL may be unreachable from the Space. This was not tested here.
+- **Persistent storage.** A Space with Hugging Face's paid persistent storage has a disk at
+  `/data` that survives restarts, and the app uses `/data/slideseek-accounts.db` when it
+  finds one. It is not free.
+
+Without either, the Space logs a warning at start-up and keeps accounts in a file that the
+next restart wipes.
+
 ## With Docker
 
 ```bash
@@ -140,6 +187,7 @@ Both ways of running read the same environment variables.
 | `SLIDESEEK_BENCHMARK` | `results/test/metrics.json` | Benchmark metrics to show; the page shows none if the file is absent. |
 | `SLIDESEEK_DEVICE` | `cpu` | Device for the query encoders. Always `cpu` on ZeroGPU. |
 | `SLIDESEEK_RERANK` | unset | `1` offers "Rerank on a GPU" in the Space's app. Not read by the container. |
+| `SLIDESEEK_DATABASE_URL` | `sqlite:///accounts.db` | Where accounts are kept ([Accounts](#accounts)). On a Space, a secret; without it, `/data` if the Space has persistent storage. |
 
 ## Why the frontend is not Gradio's
 

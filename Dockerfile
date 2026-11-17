@@ -6,6 +6,11 @@
 # The index is not baked into the image. Mount one at /home/user/index, or set
 # SLIDESEEK_INDEX_REPO to a Hugging Face dataset repository and it is downloaded at
 # start-up (this is how the hosted demo gets its index).
+#
+# Searching needs an account. Accounts are kept in the database SLIDESEEK_DATABASE_URL names:
+# a PostgreSQL URL, or SQLite on a mounted volume, for example
+#   -v "$PWD/data:/home/user/data" -e SLIDESEEK_DATABASE_URL=sqlite:////home/user/data/accounts.db
+# Without it they go in a file inside the container and are lost with the container.
 
 FROM python:3.12-slim
 
@@ -27,7 +32,7 @@ RUN pip install --user torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY --chown=user pyproject.toml README.md ./
 COPY --chown=user slideseek ./slideseek
-RUN pip install --user ".[models,ocr,web]"
+RUN pip install --user ".[models,ocr,web,postgres]"
 
 # Fetch the two query encoders at build time, so a cold start does not begin with a
 # three-gigabyte download.

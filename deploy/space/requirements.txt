@@ -14,6 +14,14 @@ protobuf>=4
 rapidocr>=3.2
 onnxruntime>=1.19
 
+# Accounts: storage, password hashing, and checking email addresses and phone numbers.
+# FastAPI comes with Gradio. psycopg is for keeping the accounts in PostgreSQL.
+sqlalchemy>=2.0
+argon2-cffi>=23.1
+email-validator>=2.2
+phonenumberslite>=8.13
+psycopg[binary]>=3.2
+
 numpy>=1.26
 pandas>=2.2
 pyarrow>=16

@@ -20,8 +20,8 @@ Semantic search for lecture recordings: what was said, what was on the slide, an
 slide looked like. Source code and documentation:
 https://github.com/lakshyasakhuja/slideseek
 
-This Space runs the web app from that repository. Searching runs on the Space's CPU and
-costs a visitor nothing. The search index is downloaded at start-up from the dataset
+This Space runs the web app from that repository. Searching needs a free account, runs on
+the Space's CPU and costs a visitor nothing. The search index is downloaded at start-up from the dataset
 repository named in the `SLIDESEEK_INDEX_REPO` variable.
 
 The lectures indexed here come from MIT OpenCourseWare and are used under CC BY-NC-SA 4.0.

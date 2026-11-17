@@ -184,8 +184,10 @@ def test_space_requirements_cover_what_the_app_imports():
     wanted = requirement_names(toml_list(project, "dependencies"))
     wanted |= requirement_names(toml_list(project, "models"))
     wanted |= requirement_names(toml_list(project, "ocr"))
-    # Command-line only, and provided by the Space itself, respectively.
-    wanted -= {"typer"}
+    wanted |= requirement_names(toml_list(project, "web"))
+    wanted |= requirement_names(toml_list(project, "postgres"))
+    # Command-line only; and FastAPI and its server, which come with Gradio.
+    wanted -= {"typer", "fastapi", "uvicorn"}
     listed = requirement_names((ROOT / "deploy/space/requirements.txt").read_text().splitlines())
     assert wanted <= listed, f"missing from the Space's requirements: {sorted(wanted - listed)}"
     assert not listed & {"gradio", "spaces"}, "the Space's SDK provides these; do not pin them"
