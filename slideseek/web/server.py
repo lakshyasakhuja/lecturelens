@@ -517,10 +517,36 @@ def load_index_from_env() -> Index:
     return Index.load(index_dir)
 
 
+def accounts_token_from_env() -> str | None:
+    """The token for the accounts' dataset: ``SLIDESEEK_ACCOUNTS_TOKEN``, else ``HF_TOKEN``."""
+    for name in ("SLIDESEEK_ACCOUNTS_TOKEN", "HF_TOKEN"):
+        token = os.environ.get(name, "").strip()
+        if token:
+            return token
+    return None
+
+
 def accounts_from_env(default: str = DEFAULT_DATABASE_URL) -> AccountStore:
-    """The account store named by ``SLIDESEEK_DATABASE_URL``, or ``default``."""
-    url = os.environ.get("SLIDESEEK_DATABASE_URL", "").strip() or default
-    store = AccountStore(url)
+    """The account store the environment asks for.
+
+    ``SLIDESEEK_DATABASE_URL`` names the database; without it, ``default`` does. With
+    ``SLIDESEEK_ACCOUNTS_REPO`` set and no database URL, the accounts are kept in the SQLite
+    file ``default`` names, with a copy in that private Hugging Face dataset
+    (``slideseek.backup``), written with the token from ``accounts_token_from_env``.
+    """
+    url = os.environ.get("SLIDESEEK_DATABASE_URL", "").strip()
+    repo = os.environ.get("SLIDESEEK_ACCOUNTS_REPO", "").strip()
+    if repo and url:
+        log.warning("SLIDESEEK_ACCOUNTS_REPO is ignored: SLIDESEEK_DATABASE_URL is set")
+    if repo and not url:
+        from slideseek.backup import backed_up_accounts
+
+        store, _ = backed_up_accounts(repo, default, token=accounts_token_from_env())
+        log.info(
+            "accounts are kept in %s, with a copy in the dataset %s", redacted(store.url), repo
+        )
+        return store
+    store = AccountStore(url or default)
     log.info("accounts are kept in %s", redacted(store.url))
     return store
 
@@ -541,6 +567,9 @@ def create_app_from_env() -> FastAPI:
     ``SLIDESEEK_DEVICE``      device for the query encoders (default ``cpu``)
     ``SLIDESEEK_DATABASE_URL``  where accounts are kept: a SQLAlchemy URL such as
                                 ``postgresql://...`` (default ``sqlite:///accounts.db``)
+    ``SLIDESEEK_ACCOUNTS_REPO``  a private Hugging Face dataset to keep a copy of the
+                                accounts' SQLite file in, for a disk that does not last
+    ``SLIDESEEK_ACCOUNTS_TOKEN``  a token that can write to that dataset (or ``HF_TOKEN``)
     """
     from slideseek.logs import configure_logging
 

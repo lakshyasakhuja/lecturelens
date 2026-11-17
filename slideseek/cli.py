@@ -517,6 +517,13 @@ def deploy(
     hardware: str = typer.Option(
         "zero-a10g", help="Hardware for a new Space. The default is ZeroGPU, which is free."
     ),
+    accounts_repo: str | None = typer.Option(
+        None,
+        "--accounts-repo",
+        help="Private dataset to keep a copy of the accounts in, e.g. user/slideseek-accounts. "
+        "Created, private, if missing. The Space also needs the secret "
+        "SLIDESEEK_ACCOUNTS_TOKEN, set by hand.",
+    ),
 ) -> None:
     """Deploy the web app as a Hugging Face Space on ZeroGPU, serving a published index.
 
@@ -528,8 +535,10 @@ def deploy(
     from slideseek.publish import push_space
 
     try:
-        url = push_space(repo_id, index_repo, private=private, hardware=hardware)
-    except FileNotFoundError as err:
+        url = push_space(
+            repo_id, index_repo, private=private, hardware=hardware, accounts_repo=accounts_repo
+        )
+    except (FileNotFoundError, ValueError) as err:
         fail(str(err))
     except Exception as err:  # the hub client raises many unrelated types
         fail(

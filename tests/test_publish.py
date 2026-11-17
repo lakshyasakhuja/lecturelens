@@ -92,6 +92,7 @@ def _fake_hub(monkeypatch, calls):
             calls.append(("repo_info", repo_id, kwargs))
             if repo_id.endswith("/missing"):
                 raise RuntimeError("404: no such repository")
+            return types.SimpleNamespace(private=not repo_id.endswith("/public"))
 
         def add_space_variable(self, repo_id, key, value):
             calls.append(("add_space_variable", repo_id, key, value))
@@ -204,6 +205,42 @@ def test_push_space_creates_a_zerogpu_gradio_space_and_points_it_at_the_index(mo
     assert {"app.py", "requirements.txt", "README.md", "slideseek/web/space.py"} <= set(
         upload["files"]
     )
+
+
+def test_push_space_names_a_private_dataset_for_the_accounts(monkeypatch):
+    calls = []
+    _fake_hub(monkeypatch, calls)
+
+    push_space(
+        "someone/slideseek",
+        "someone/lectures-index",
+        root=ROOT,
+        accounts_repo="someone/slideseek-accounts",
+    )
+
+    assert (
+        "create_repo",
+        "someone/slideseek-accounts",
+        {"repo_type": "dataset", "private": True, "exist_ok": True},
+    ) in calls
+    assert (
+        "add_space_variable",
+        "someone/slideseek",
+        "SLIDESEEK_ACCOUNTS_REPO",
+        "someone/slideseek-accounts",
+    ) in calls
+    # The token is the Space's secret to hold; deploying never sets one.
+    assert not [call for call in calls if "secret" in call[0]]
+
+
+def test_push_space_refuses_a_public_dataset_for_the_accounts(monkeypatch):
+    calls = []
+    _fake_hub(monkeypatch, calls)
+    with pytest.raises(ValueError, match="is public"):
+        push_space(
+            "someone/slideseek", "someone/lectures-index", root=ROOT, accounts_repo="someone/public"
+        )
+    assert "upload_folder" not in [call[0] for call in calls]
 
 
 def test_push_space_stops_before_creating_anything_if_the_index_is_not_published(monkeypatch):

@@ -12,7 +12,12 @@ from fakes import ADA, fast_accounts
 from sqlalchemy import select
 
 from slideseek.accounts import (
+    ACCOUNT_CREATED,
+    ACCOUNT_DELETED,
+    PASSWORD_REHASHED,
     PASSWORD_RULES,
+    SESSION_ENDED,
+    SESSION_STARTED,
     AccountError,
     FieldError,
     Throttle,
@@ -267,6 +272,43 @@ def test_deleting_an_account_needs_its_password_and_ends_its_sessions(store):
     assert stored(store, sessions.c.token_hash) == []
     # The username and the address are free again.
     store.sign_up(**ADA)
+
+
+def test_every_change_is_announced_once_it_is_made(store):
+    seen = []
+    store.on_change = seen.append
+    account = store.sign_up(**ADA)
+    token = store.start_session(account)
+    # What changes nothing is not announced.
+    store.sign_in("ada", "Analytical-Engine2")
+    store.account_for_token(token)
+    with pytest.raises(AccountError):
+        store.sign_up(**ADA)
+    store.end_session(token)
+    store.end_session(token)
+    store.delete_account(account, "Analytical-Engine2")
+    store.delete_account(account, ADA["password"])
+    assert seen == [ACCOUNT_CREATED, SESSION_STARTED, SESSION_ENDED, ACCOUNT_DELETED]
+
+
+def test_a_failing_listener_does_not_undo_or_fail_the_change(store):
+    def broken(change):
+        raise RuntimeError("the listener is broken")
+
+    store.on_change = broken
+    account = store.sign_up(**ADA)
+    assert store.sign_in("ada", ADA["password"]) == account
+
+
+def test_a_rehash_is_announced():
+    weak = fast_accounts()
+    weak.sign_up(**ADA)
+    seen = []
+    weak.on_change = seen.append
+    weak.hasher = PasswordHasher(time_cost=2, memory_cost=16, parallelism=1)
+    weak.sign_in("ada", ADA["password"])
+    weak.sign_in("ada", ADA["password"])
+    assert seen == [PASSWORD_REHASHED]
 
 
 def test_accounts_in_a_file_outlive_the_store(tmp_path):

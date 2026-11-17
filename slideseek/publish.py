@@ -194,17 +194,29 @@ def push_space(
     token: str | None = None,
     private: bool = False,
     hardware: str = ZERO_GPU,
+    accounts_repo: str | None = None,
 ) -> str:
     """Create or update the Hugging Face Space that serves ``index_repo``. Returns its URL.
 
     The Space is created on ZeroGPU, which is the hardware a free account may use; an
     existing Space keeps the hardware it has. The index must already be published
     (``push_index``), and publicly: the Space is given its name, not a token to read it.
+
+    ``accounts_repo`` is the private dataset the Space keeps a copy of its accounts in
+    (``slideseek.backup``). It is created, private, if it does not exist, and refused if it
+    is public. The token the Space writes to it with is a secret, set on the Space by hand.
     """
     from huggingface_hub import HfApi
 
     api = HfApi(token=token)
     api.repo_info(index_repo, repo_type="dataset")  # fail now, not when the Space starts
+    if accounts_repo:
+        api.create_repo(accounts_repo, repo_type="dataset", private=True, exist_ok=True)
+        if getattr(api.repo_info(accounts_repo, repo_type="dataset"), "private", None) is not True:
+            raise ValueError(
+                f"{accounts_repo} is public; the accounts are only ever copied to a private "
+                "dataset. Make it private, or name another."
+            )
     api.create_repo(
         repo_id,
         repo_type="space",
@@ -214,6 +226,8 @@ def push_space(
         exist_ok=True,
     )
     api.add_space_variable(repo_id, "SLIDESEEK_INDEX_REPO", index_repo)
+    if accounts_repo:
+        api.add_space_variable(repo_id, "SLIDESEEK_ACCOUNTS_REPO", accounts_repo)
     with tempfile.TemporaryDirectory() as staging:
         stage_space(staging, root)
         api.upload_folder(

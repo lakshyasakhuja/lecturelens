@@ -22,7 +22,8 @@ https://github.com/lakshyasakhuja/slideseek
 
 This Space runs the web app from that repository. Searching needs a free account, runs on
 the Space's CPU and costs a visitor nothing. The search index is downloaded at start-up from the dataset
-repository named in the `SLIDESEEK_INDEX_REPO` variable.
+repository named in the `SLIDESEEK_INDEX_REPO` variable. The accounts are kept with a copy in
+the private dataset named in `SLIDESEEK_ACCOUNTS_REPO`.
 
 The lectures indexed here come from MIT OpenCourseWare and are used under CC BY-NC-SA 4.0.
 This Space hosts no lecture video; every result links to the recording at its source.

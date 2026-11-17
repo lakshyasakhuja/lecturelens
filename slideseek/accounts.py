@@ -25,7 +25,8 @@ How it is kept
 
     Any SQL database that SQLAlchemy can reach will do: SQLite on a laptop, PostgreSQL where
     the accounts have to outlive the server. A Hugging Face Space's disk is wiped whenever
-    it restarts, so the hosted demo keeps its accounts in PostgreSQL.
+    it restarts, so the hosted demo keeps them in SQLite and a copy of the file in a private
+    dataset (``slideseek.backup``), told of every change through ``AccountStore.on_change``.
 """
 
 from __future__ import annotations
@@ -121,6 +122,13 @@ PASSWORD_RULE = (
     f"Use at least {MIN_PASSWORD} characters, with an uppercase letter, a lowercase letter, "
     "a number and a special character."
 )
+
+# What ``AccountStore.on_change`` is told, after the change has been committed.
+ACCOUNT_CREATED = "account created"
+ACCOUNT_DELETED = "account deleted"
+PASSWORD_REHASHED = "password rehashed"
+SESSION_STARTED = "session started"
+SESSION_ENDED = "session ended"
 
 metadata = MetaData()
 
@@ -350,7 +358,12 @@ class AccountStore:
     ``sqlite://`` keeps them in memory, for as long as the process runs; a path such as
     ``sqlite:///accounts.db`` keeps them in a file; a ``postgresql://`` URL keeps them in
     PostgreSQL. The tables are created if they are not there.
+
+    ``on_change``, if set, is called with one of the names above (``ACCOUNT_CREATED`` and
+    so on) after each change to the database has been committed.
     """
+
+    on_change: Callable[[str], None] | None = None
 
     def __init__(
         self,
@@ -381,6 +394,14 @@ class AccountStore:
 
     def __repr__(self) -> str:
         return f"AccountStore({redacted(self.url)!r})"
+
+    def _changed(self, change: str) -> None:
+        if self.on_change is None:
+            return
+        try:
+            self.on_change(change)
+        except Exception:  # the change is made; whoever was told of it failed, not the change
+            log.exception("on_change failed after: %s", change)
 
     # -- signing up
 
@@ -436,6 +457,7 @@ class AccountStore:
                 taken or {"username": "That username is taken. Choose another."}, conflict=True
             ) from None
         log.info("account created: %s", values["username"])
+        self._changed(ACCOUNT_CREATED)
         return Account(
             id=account_id,
             username=row["username"],
@@ -491,6 +513,7 @@ class AccountStore:
                     .where(users.c.id == row.id)
                     .values(password_hash=self.hasher.hash(password))
                 )
+            self._changed(PASSWORD_REHASHED)
         return _account(row)
 
     def _verify(self, password_hash: str, password: str) -> bool:
@@ -518,6 +541,7 @@ class AccountStore:
                     expires_at=now + self.session_seconds,
                 )
             )
+        self._changed(SESSION_STARTED)
         return token
 
     def account_for_token(self, token: str | None) -> Account | None:
@@ -551,7 +575,9 @@ class AccountStore:
         with self._cache_lock:
             self._cache.pop(key, None)
         with self.engine.begin() as db:
-            db.execute(delete(sessions).where(sessions.c.token_hash == key))
+            ended = db.execute(delete(sessions).where(sessions.c.token_hash == key)).rowcount
+        if ended:
+            self._changed(SESSION_ENDED)
 
     # -- leaving
 
@@ -569,6 +595,7 @@ class AccountStore:
             for key in [key for key, (held, _, _) in self._cache.items() if held.id == account.id]:
                 del self._cache[key]
         log.info("account deleted: %s", account.username)
+        self._changed(ACCOUNT_DELETED)
         return True
 
     def count(self) -> int:

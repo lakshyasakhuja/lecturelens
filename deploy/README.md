@@ -31,8 +31,8 @@ runs Gradio apps only, so on a Space the app is served by Gradio's server mode
 API and the search itself are exactly the ones `slideseek serve` runs.
 
 - **Searching** runs on the Space's CPU and costs a visitor nothing, once they have an
-  account. A Space's disk does not last, so the accounts need a database of their own:
-  see [Accounts](#accounts).
+  account. A Space's disk does not last, so the accounts are kept with a copy in a private
+  dataset: see [Accounts](#accounts).
 - **"Rerank on a GPU"** is built but switched off, because on ZeroGPU it does not work yet;
   [what was found](#what-the-first-deployment-showed) is below. With
   `SLIDESEEK_RERANK=1` the page shows a switch that rescores the fused top 20 with the
@@ -58,23 +58,39 @@ relying on it.
    uv run slideseek push <user>/slideseek-index --index index
    ```
 
-3. Create the Space, point it at the index and upload the app:
+3. Create the private dataset that keeps a copy of the accounts ([why](#accounts)):
 
    ```bash
-   uv run slideseek deploy <user>/slideseek --index-repo <user>/slideseek-index
+   uv run hf repos create <user>/slideseek-accounts --type dataset --private
    ```
 
-The Space then builds for a few minutes, downloads the index, loads the models and starts.
-Its *Logs* tab shows each step. Run step 3 again to update the Space after changing the
-code, and step 2 after rebuilding the index.
+   Then create a token that can write to that dataset and nothing else: at
+   <https://huggingface.co/settings/tokens>, choose *Fine-grained*, add the dataset under
+   *Repositories permissions*, tick the read and the write permission for the selected
+   repositories, and leave every other box empty.
+
+4. Create the Space, point it at the index and the dataset, and upload the app:
+
+   ```bash
+   uv run slideseek deploy <user>/slideseek --index-repo <user>/slideseek-index --accounts-repo <user>/slideseek-accounts
+   ```
+
+5. On the Space, under *Settings → Variables and secrets*, add a **secret** named
+   `SLIDESEEK_ACCOUNTS_TOKEN` holding the token from step 3, then *Restart this Space*.
+   On a Space that already exists, add it before step 4 instead. Until the secret is
+   there the Space does not start, and its *Logs* tab says it cannot reach the dataset.
+
+The Space then builds for a few minutes, downloads the index and the accounts, loads the
+models and starts. Its *Logs* tab shows each step. Run step 4 again to update the Space
+after changing the code, and step 2 after rebuilding the index.
 
 `slideseek deploy` uploads the package's source, `config/examples.json`, the measured
 benchmark if `results/test/metrics.json` exists, and the three files in `deploy/space`:
 `app.py` (the entry point), `requirements.txt` and `README.md` (the Space's metadata: SDK,
 Gradio version, Python version, models to fetch at build time). It uploads no video and no
 index. The same thing by hand: create a Space with the Gradio SDK and ZeroGPU hardware, add
-the variable `SLIDESEEK_INDEX_REPO` under *Settings → Variables and secrets*, and push
-those files to it.
+the variables `SLIDESEEK_INDEX_REPO` and `SLIDESEEK_ACCOUNTS_REPO` under *Settings →
+Variables and secrets*, and push those files to it.
 
 To run the Space's app on your own machine, with the switch, where `@spaces.GPU` does
 nothing and the reranker runs on the CPU:
@@ -130,19 +146,51 @@ and `slideseek/web/auth.py`. In short:
 - Failed sign-ins are limited per address and per account, and sign-ups per address.
 - A visitor can sign out, and can delete their account with its password.
 
-The accounts live in whatever database `SLIDESEEK_DATABASE_URL` names, as a SQLAlchemy URL:
+Where the accounts are kept:
 
 | Where it runs | What to set |
 |---|---|
 | A laptop | Nothing. They go in `accounts.db` where the server runs. |
-| A container | A PostgreSQL URL, or SQLite on a mounted volume (see the `Dockerfile`). |
-| A Hugging Face Space | A database outside the Space: its own disk is wiped every time it restarts or is redeployed, and accounts kept on it go with it. |
+| A container | `SLIDESEEK_DATABASE_URL`: a PostgreSQL URL, or SQLite on a mounted volume (see the `Dockerfile`). |
+| A Hugging Face Space | `SLIDESEEK_ACCOUNTS_REPO`, a private dataset, and the secret `SLIDESEEK_ACCOUNTS_TOKEN` (steps 3 to 5 [above](#on-hugging-face-spaces-free)). |
 
-A database URL holds a password, so on a Space it goes under *Settings → Variables and
-secrets* as a **secret**, never as a variable: variables are public. URLs that start with
-`postgres://` or `postgresql://`, as hosts hand them out, are read as psycopg URLs.
+### On a Space: a copy in a private dataset
 
-Two things to know before choosing a database for a Space:
+A Space's own disk is wiped every time it restarts, is redeployed or wakes from sleep, and
+accounts kept only on it go with it. Hugging Face's persistent storage would keep them, but
+it is paid. So the accounts stay in a SQLite file on the Space's disk, and a copy of that
+file is kept in a private dataset repository on the Hub, which the Space reaches over
+HTTPS (`slideseek/backup.py`):
+
+- **At start-up** the copy is downloaded before the database is opened. If the dataset has
+  a copy that cannot be downloaded after four tries, or that is damaged, the Space does not
+  start: starting with no accounts would overwrite the copy at the first change. The
+  *Logs* tab says what went wrong.
+- **After a change** (a sign-up, a sign-in, a sign-out, a deletion) a snapshot of the file
+  is uploaded: 10 seconds after the first change, so that a burst of changes makes one
+  commit, and never more often than every 2 minutes, because the Hub limits commits per
+  repository per hour. A failed upload is tried again, waiting twice as long each time.
+- **When the Space is stopped**, the last changes are uploaded first. A crash can lose up
+  to the last two minutes.
+- Sessions are in the copy too, so a restart signs nobody out.
+- The dataset must be private. It is checked before every download and upload, and a
+  public one is refused. `slideseek deploy --accounts-repo` refuses a public one too.
+- When an account is deleted, the dataset's history is squashed into one commit, and the
+  earlier copies are deleted from the Hub's file storage, so the account does not live on
+  in an old version. The history is also squashed every 25 uploads to keep it short.
+
+This puts the name, email address, phone number and password hash of everyone who signs
+up in a private repository on your Hugging Face account. Anyone who can sign in to that
+account, or who holds the token, can read them. That is why the token in step 3 is
+limited to that one dataset.
+
+### Other places
+
+`SLIDESEEK_DATABASE_URL` names any database as a SQLAlchemy URL, and wins over
+`SLIDESEEK_ACCOUNTS_REPO` when both are set. It holds a password, so on a Space it goes
+under *Settings → Variables and secrets* as a **secret**, never as a variable: variables
+are public. URLs that start with `postgres://` or `postgresql://`, as hosts hand them out,
+are read as psycopg URLs.
 
 - **Ports.** Hugging Face's forum, including replies from its staff, says a Space can only
   make outgoing connections on ports 80, 443 and 8080, and that other ports are opened
@@ -150,10 +198,10 @@ Two things to know before choosing a database for a Space:
   PostgreSQL may be unreachable from the Space. This was not tested here.
 - **Persistent storage.** A Space with Hugging Face's paid persistent storage has a disk at
   `/data` that survives restarts, and the app uses `/data/slideseek-accounts.db` when it
-  finds one. It is not free.
+  finds one.
 
-Without either, the Space logs a warning at start-up and keeps accounts in a file that the
-next restart wipes.
+With none of these, the Space logs a warning at start-up and keeps accounts in a file
+that the next restart wipes.
 
 ## With Docker
 
@@ -187,7 +235,9 @@ Both ways of running read the same environment variables.
 | `SLIDESEEK_BENCHMARK` | `results/test/metrics.json` | Benchmark metrics to show; the page shows none if the file is absent. |
 | `SLIDESEEK_DEVICE` | `cpu` | Device for the query encoders. Always `cpu` on ZeroGPU. |
 | `SLIDESEEK_RERANK` | unset | `1` offers "Rerank on a GPU" in the Space's app. Not read by the container. |
-| `SLIDESEEK_DATABASE_URL` | `sqlite:///accounts.db` | Where accounts are kept ([Accounts](#accounts)). On a Space, a secret; without it, `/data` if the Space has persistent storage. |
+| `SLIDESEEK_ACCOUNTS_REPO` | unset | Private dataset that keeps a copy of the accounts' SQLite file ([Accounts](#on-a-space-a-copy-in-a-private-dataset)). Ignored when `SLIDESEEK_DATABASE_URL` is set. |
+| `SLIDESEEK_ACCOUNTS_TOKEN` | unset | Token that can write to that dataset; a Space **secret**. `HF_TOKEN` is used if this is unset. |
+| `SLIDESEEK_DATABASE_URL` | `sqlite:///accounts.db` | Where accounts are kept ([Accounts](#other-places)). On a Space, a secret; without it, `/data` if the Space has persistent storage. |
 
 ## Why the frontend is not Gradio's
 

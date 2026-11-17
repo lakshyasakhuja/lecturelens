@@ -18,8 +18,9 @@ Outside ZeroGPU, ``@spaces.GPU`` does nothing and the reranker runs on whatever 
 is given, so the Space can be run and tested on a laptop.
 
 A Space's own disk is wiped whenever it restarts, so accounts kept on it last only until
-then. ``SLIDESEEK_DATABASE_URL`` names a database that outlives it (PostgreSQL); failing
-that, a Space with persistent storage keeps them under ``/data``.
+then. ``SLIDESEEK_ACCOUNTS_REPO`` names a private dataset that keeps a copy of them, restored
+at start-up (``slideseek.backup``); ``SLIDESEEK_DATABASE_URL`` names a database that outlives
+the Space instead; and a Space with persistent storage keeps them under ``/data``.
 
 Reranking is off unless ``SLIDESEEK_RERANK=1``, because on ZeroGPU it does not work yet.
 Measured on the deployed Space in November 2026 (torch 2.13.0, spaces 0.51.3): a GPU call
@@ -83,14 +84,18 @@ def rerank_enabled() -> bool:
 
 def default_database_url() -> str:
     """Where accounts go without ``SLIDESEEK_DATABASE_URL``: persistent storage if the Space
-    has it (mounted at ``/data``), or else a file that the next restart will wipe."""
+    has it (mounted at ``/data``), or else a file that the next restart will wipe unless
+    ``SLIDESEEK_ACCOUNTS_REPO`` keeps a copy of it."""
     data = Path("/data")
     if data.is_dir() and os.access(data, os.W_OK):
         return f"sqlite:///{data / 'slideseek-accounts.db'}"
-    if not os.environ.get("SLIDESEEK_DATABASE_URL"):
+    if not any(
+        os.environ.get(name, "").strip()
+        for name in ("SLIDESEEK_DATABASE_URL", "SLIDESEEK_ACCOUNTS_REPO")
+    ):
         log.warning(
-            "no SLIDESEEK_DATABASE_URL and no persistent storage: accounts will be lost "
-            "when the Space restarts"
+            "no SLIDESEEK_ACCOUNTS_REPO, no SLIDESEEK_DATABASE_URL and no persistent storage: "
+            "accounts will be lost when the Space restarts"
         )
     return DEFAULT_DATABASE_URL
 
@@ -210,8 +215,9 @@ def create_space_from_env() -> gradio.Server:
     It reads the same variables: ``SLIDESEEK_INDEX``, ``SLIDESEEK_INDEX_REPO``,
     ``SLIDESEEK_EXAMPLES``, ``SLIDESEEK_BENCHMARK`` and ``SLIDESEEK_DEVICE`` (the
     device of the query encoders, ``cpu`` unless set), and one more: ``SLIDESEEK_RERANK``,
-    which turns reranking on when it is ``1``; and ``SLIDESEEK_DATABASE_URL``, where the
-    accounts are kept (see ``default_database_url`` for what happens without it).
+    which turns reranking on when it is ``1``; and ``SLIDESEEK_ACCOUNTS_REPO`` with
+    ``SLIDESEEK_ACCOUNTS_TOKEN``, or ``SLIDESEEK_DATABASE_URL``, for where the accounts are
+    kept (see ``accounts_from_env``, and ``default_database_url`` for when neither is set).
     """
     from slideseek.logs import configure_logging
 
