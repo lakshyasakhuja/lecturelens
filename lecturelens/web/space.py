@@ -48,6 +48,7 @@ from lecturelens.web.server import (
     load_benchmark,
     load_examples,
     load_index_from_env,
+    load_picture_benchmark,
 )
 
 # The longest one reranking call may hold a GPU, in seconds. Twenty short documents take
@@ -98,6 +99,7 @@ def create_space(
     rerank: bool = True,
     examples: Sequence[Mapping[str, str]] = (),
     benchmark: Mapping[str, Any] | None = None,
+    picture_benchmark: Mapping[str, Any] | None = None,
     device: str = "cpu",
     warm_up: bool = True,
 ) -> gradio.Server:
@@ -125,6 +127,7 @@ def create_space(
         searcher.reranker = reranker
     if warm_up:
         searcher.warm_up()
+        searcher.warm_up_pictures()
 
     server = gradio.Server(
         title="LectureLens", version=__version__, docs_url=None, redoc_url=None, openapi_url=None
@@ -134,6 +137,7 @@ def create_space(
         searcher,
         examples=examples,
         benchmark=benchmark,
+        picture_benchmark=picture_benchmark,
         device=device,
         warm_up=False,
         app=server,
@@ -177,6 +181,9 @@ def create_space_from_env() -> gradio.Server:
         ),
         benchmark=load_benchmark(
             os.environ.get("LECTURELENS_BENCHMARK", "results/test/metrics.json")
+        ),
+        picture_benchmark=load_picture_benchmark(
+            os.environ.get("LECTURELENS_PICTURE_BENCHMARK", "results/screenshot/metrics.json")
         ),
         device=os.environ.get("LECTURELENS_DEVICE", "cpu"),
     )

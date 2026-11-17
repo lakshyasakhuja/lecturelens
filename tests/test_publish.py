@@ -158,12 +158,14 @@ def test_staged_space_holds_the_app_and_nothing_it_should_not(tmp_path):
     assert (staged / "README.md").read_text().startswith("---\ntitle: LectureLens\n")
     assert "sdk: gradio" in (staged / "README.md").read_text()
 
-    # No recordings, no index, no caches, and nothing binary: the Hub refuses binary files
-    # pushed as plain git objects, and none of this belongs in a public Space anyway.
+    # No recordings, no index and no caches. The one binary file is the page's example
+    # photo of a slide, which the Hub API uploads like any other file; it must stay small.
+    sample = "lecturelens/web/static/samples/slide-photo.jpg"
+    assert sample in files and (staged / sample).stat().st_size < 100_000
     media = {".mp4", ".mkv", ".mov", ".webm", ".wav", ".npy", ".parquet", ".jpg", ".png", ".pyc"}
-    assert not [name for name in files if Path(name).suffix.lower() in media]
+    assert not [name for name in files if Path(name).suffix.lower() in media and name != sample]
     assert not [name for name in files if "__pycache__" in name or "/." in f"/{name}"]
-    for name in files:
+    for name in files - {sample}:
         (staged / name).read_text(encoding="utf-8")  # raises if a file is not text
 
 

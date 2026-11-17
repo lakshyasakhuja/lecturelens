@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>LectureLens. Find the moment.</title>
-  <meta name="description" content="Search lecture recordings in plain English and jump straight to the moment that answers your question. Ranked by what was said, what was on the slide, and what the slide looked like.">
+  <title>Slideseek. Find the slide, hear it explained.</title>
+  <meta name="description" content="Ask a question or show it a picture of a slide, and jump to the moment in the lecture where it was shown. Ranked by what was said, what was on the slide, and what the slide looked like. Nothing is generated.">
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#ffffff">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -25,6 +25,7 @@
         <span>LectureLens</span>
       </a>
       <nav class="nav__links" aria-label="Sections">
+        <a href="#pictures">Pictures</a>
         <a href="#signals">Signals</a>
         <a href="#how">How it works</a>
         <a href="#library">Library</a>
@@ -40,10 +41,10 @@
     <section class="hero">
       <div class="container container--text">
         <p class="eyebrow reveal">LectureLens</p>
-        <h1 class="hero__headline reveal">Find the <span class="gradient-text">moment.</span></h1>
+        <h1 class="hero__headline reveal">Find the slide. <span class="gradient-text">Hear it explained.</span></h1>
         <p class="lead reveal">
-          Search a whole semester of lectures <strong>in plain English</strong>, and jump straight
-          to the minute that answers your question.
+          Ask in plain English, or <strong>show it a picture of a slide</strong>. It finds the
+          moment in the lecture where that slide was on screen, and plays it from there.
         </p>
 
         <form class="search reveal" id="search" role="search" action="/" method="get" autocomplete="off">
@@ -53,8 +54,22 @@
               <circle cx="10.5" cy="10.5" r="6.75" fill="none" stroke="currentColor" stroke-width="1.8"/>
               <path d="M15.6 15.6 20.5 20.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
             </svg>
+            <span class="search__chip" id="picture-chip" hidden>
+              <img class="search__chip-image" id="picture-preview" alt="">
+              <span class="search__chip-label">Your picture</span>
+              <button class="search__chip-clear" id="picture-clear" type="button" aria-label="Remove the picture">
+                <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 3.5l5 5M8.5 3.5l-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </button>
+            </span>
             <input class="search__input" id="query" name="q" type="search" maxlength="300"
-                   placeholder="Ask about anything in the lectures" enterkeyhint="search" spellcheck="false">
+                   placeholder="Ask a question, or paste a picture of a slide" enterkeyhint="search" spellcheck="false">
+            <input class="visually-hidden" id="picture-input" type="file" accept="image/*" tabindex="-1" aria-hidden="true">
+            <button class="search__picture" id="picture-button" type="button" aria-label="Search with a picture of a slide" title="Search with a picture of a slide">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.6l1.3-1.8c.3-.4.7-.6 1.2-.6h2.8c.5 0 .9.2 1.2.6L15.9 6h1.6A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                <circle cx="12" cy="12.4" r="3.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+              </svg>
+            </button>
             <button class="search__submit" type="submit" aria-label="Search">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M5 12h13M12.5 6.5 18 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -76,7 +91,7 @@
                 <span class="switch__label">Rerank on a GPU</span>
               </label>
             </div>
-            <span class="search__hint" id="hint">Press <kbd>/</kbd> to search from anywhere</span>
+            <span class="search__hint" id="hint">Press <kbd>/</kbd> to search, or drop a picture here</span>
           </div>
         </form>
 
@@ -90,10 +105,62 @@
         <div class="results__head">
           <h2 class="results__title" id="results-title"></h2>
           <p class="results__status" id="status" role="status" aria-live="polite"></p>
+          <p class="results__read" id="read" hidden></p>
         </div>
         <div class="results__grid" id="results-grid"></div>
         <p class="results__empty" id="empty" hidden>
           No matching moments. Try describing it another way, or widen the search to all lectures.
+        </p>
+      </div>
+    </section>
+
+    <!-- Pictures -->
+    <section class="section section--tinted" id="pictures">
+      <div class="container">
+        <div class="section__head reveal">
+          <h2 class="headline">A picture is a question too.</h2>
+          <p class="lead">
+            Photograph the projector, screenshot the recording, or crop the slide you are stuck on.
+            It is matched by <strong>what it looks like</strong> and by <strong>the words on it</strong>,
+            and you land on the minute it was on screen.
+          </p>
+        </div>
+
+        <ul class="bento" id="picture-tiles">
+          <li class="tile tile--third tile--stat reveal">
+            <p class="stat__value" data-variant="photo">–</p>
+            <p class="stat__label" data-variant-label="photo">found first</p>
+            <h3 class="tile__title">Snap the screen.</h3>
+            <p class="tile__text">A phone photo of the slide, at an angle, with the room around it. On a phone, the camera button opens the camera.</p>
+          </li>
+          <li class="tile tile--third tile--stat reveal">
+            <p class="stat__value" data-variant="frame">–</p>
+            <p class="stat__label" data-variant-label="frame">found first</p>
+            <h3 class="tile__title">Paste a screenshot.</h3>
+            <p class="tile__text">Copy a frame of the recording and press <kbd>⌘</kbd> <kbd>V</kbd> anywhere on this page, or drop the file on the search box.</p>
+          </li>
+          <li class="tile tile--third tile--stat reveal">
+            <p class="stat__value" data-variant="crop">–</p>
+            <p class="stat__label" data-variant-label="crop">found first</p>
+            <h3 class="tile__title">Crop a corner.</h3>
+            <p class="tile__text">Two thirds of a slide is enough: the equation you could not follow, or the diagram without its title.</p>
+          </li>
+        </ul>
+        <div class="pictures__foot reveal">
+          <button class="button" id="picture-example" type="button">Try it with a photo of a slide</button>
+          <p class="pictures__note" id="picture-note">Measured on pictures made from the lectures themselves, never the frame that was indexed.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Points, not writes -->
+    <section class="section section--statement" id="points">
+      <div class="container container--text">
+        <h2 class="headline reveal">It points. It doesn’t write.</h2>
+        <p class="lead reveal">
+          Nothing on this page is generated. Every result is the lecture itself: <strong>the slide as it
+          was shown</strong>, <strong>the sentence as it was said</strong>, and the minute it happened.
+          So there is nothing to make up, and nothing for you to check.
         </p>
       </div>
     </section>
@@ -105,7 +172,7 @@
           <h2 class="headline">Three ways to remember a lecture.</h2>
           <p class="lead">
             You might recall <strong>a phrase</strong>, <strong>a word on a slide</strong>, or just
-            <strong>what the diagram looked like</strong>. LectureLens searches all three at once.
+            <strong>what the diagram looked like</strong>. All three are searched at once.
           </p>
         </div>
 

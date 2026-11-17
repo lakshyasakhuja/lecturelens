@@ -31,12 +31,15 @@ models = [
     "sentencepiece>=0.2",
     "protobuf>=4",
 ]
-# Offline indexing only: speech recognition and OCR.
-index = [
-    "lecturelens[models]",
-    "faster-whisper>=1.1",
+# Slide OCR: reads slides when indexing, and reads a picture of a slide when searching.
+ocr = [
     "rapidocr>=3.2",
     "onnxruntime>=1.19",
+]
+# Offline indexing only: speech recognition and OCR.
+index = [
+    "lecturelens[models,ocr]",
+    "faster-whisper>=1.1",
 ]
 # The web app: a small JSON API plus a static frontend. Serving real queries also needs
 # the `models` extra for the query encoders; it is kept separate so the API can be tested

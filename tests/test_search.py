@@ -315,3 +315,81 @@ def test_validate_catches_inconsistent_pieces():
     index.lectures.pop("lec02")
     with pytest.raises(InvalidIndex, match="not in the catalogue"):
         index.validate()
+
+
+# ---- pictures --------------------------------------------------------------------------------
+
+
+def picture_searcher(ocr=True):
+    from fakes import FakePictureOcr
+
+    index = make_index()
+    return Searcher(
+        index,
+        text_embedder=FakeTextEmbedder(),
+        image_embedder=FakeImageEmbedder(),
+        ocr=FakePictureOcr() if ocr else None,
+    )
+
+
+def test_a_picture_finds_the_slide_by_its_look_and_its_words():
+    from fakes import make_picture, open_picture
+
+    searcher = picture_searcher()
+    picture = open_picture(make_picture("plot two curves rising falling", "Overfitting"))
+    results = searcher.search_picture(picture, top_k=3)
+    assert results[0].moment_id == "lec01:0002"
+    assert results[0].signals == {"image": 1, "bm25_slide": 1}
+    assert set(results[0].badges) == {"on slide", "visual"}
+    assert "said" not in {badge for r in results for badge in r.badges}, "nobody said anything"
+
+
+def test_a_picture_with_no_readable_words_is_matched_on_its_look():
+    from fakes import make_picture, open_picture
+
+    searcher = picture_searcher()
+    results = searcher.search_picture(open_picture(make_picture("diagram circles connected lines")))
+    assert results[0].moment_id == "lec02:0005"
+    assert set(results[0].signals) == {"image"}
+
+
+def test_the_words_alone_can_find_a_slide_whose_look_is_unclear():
+    from fakes import make_picture, open_picture
+
+    searcher = picture_searcher()
+    picture = open_picture(make_picture("something blurry", "Backpropagation"))
+    assert searcher.search_picture(picture)[0].moment_id == "lec02:0006"
+
+
+def test_without_ocr_a_picture_is_matched_on_its_look_only(monkeypatch):
+    from fakes import make_picture, open_picture
+
+    searcher = picture_searcher(ocr=False)
+    monkeypatch.setattr(type(searcher), "can_read_pictures", property(lambda self: False))
+    encoding = searcher.encode_picture(open_picture(make_picture("equations", "Backpropagation")))
+    assert encoding.kind == "picture" and encoding.terms == () and encoding.query == ""
+
+
+def test_the_text_to_image_floor_does_not_apply_to_pictures():
+    """The calibration turns text-to-image similarity into a probability; not picture-to-picture."""
+    from fakes import make_picture, open_picture
+
+    index = make_index()
+    searcher = Searcher(
+        index,
+        SearchConfig(image_min_prob=0.99),
+        text_embedder=FakeTextEmbedder(),
+        image_embedder=FakeImageEmbedder(),
+    )
+    encoding = searcher.encode_picture(open_picture(make_picture("bullet")), read_text=False)
+    assert np.isfinite(searcher.scores("image", encoding)).any()
+
+
+def test_windows_of_one_slide_become_one_picture_result_at_its_start():
+    """Rows 3 and 4 are two windows of one long slide: one result, where the slide came up."""
+    from fakes import make_picture, open_picture
+
+    searcher = picture_searcher()
+    results = searcher.search_picture(open_picture(make_picture("bullet points", "Regularisation")))
+    rows = [r.row for r in results]
+    assert rows[0] == 3 and 4 not in rows

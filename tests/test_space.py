@@ -164,6 +164,7 @@ def test_space_requirements_cover_what_the_app_imports():
     project = (ROOT / "pyproject.toml").read_text()
     wanted = requirement_names(toml_list(project, "dependencies"))
     wanted |= requirement_names(toml_list(project, "models"))
+    wanted |= requirement_names(toml_list(project, "ocr"))
     # Command-line only, and provided by the Space itself, respectively.
     wanted -= {"typer"}
     listed = requirement_names((ROOT / "deploy/space/requirements.txt").read_text().splitlines())

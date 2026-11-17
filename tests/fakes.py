@@ -8,7 +8,9 @@ the tests need.
 
 from __future__ import annotations
 
+import io
 import zlib
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -58,6 +60,45 @@ class FakeImageEmbedder:
     def encode_texts(self, texts):
         self.calls += 1
         return np.stack([embed_text(t) for t in texts])
+
+    def encode_pictures(self, pictures):
+        """A stand-in picture says what it shows in its caption (see ``make_picture``)."""
+        self.calls += 1
+        return np.stack([embed_text(picture.info.get("caption", "")) for picture in pictures])
+
+
+class FakePictureOcr:
+    """Reads the words a stand-in picture carries (see ``make_picture``)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def read(self, picture):
+        self.calls += 1
+        return SimpleNamespace(text=picture.info.get("words", ""))
+
+
+def make_picture(caption: str, words: str = "", size=(64, 48)) -> bytes:
+    """PNG bytes standing in for a photo of a slide.
+
+    What the picture looks like (``caption``) and the text on it (``words``) travel in PNG
+    text chunks, which survive an upload and decoding, so the fakes can read them back.
+    """
+    from PIL import Image
+    from PIL.PngImagePlugin import PngInfo
+
+    info = PngInfo()
+    info.add_text("caption", caption)
+    info.add_text("words", words)
+    buffer = io.BytesIO()
+    Image.new("RGB", size, "white").save(buffer, "PNG", pnginfo=info)
+    return buffer.getvalue()
+
+
+def open_picture(data: bytes):
+    from PIL import Image
+
+    return Image.open(io.BytesIO(data))
 
 
 # (lecture, t_start, t_end, slide text, transcript, keyframe id, what the keyframe looks like)

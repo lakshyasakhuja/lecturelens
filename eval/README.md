@@ -125,3 +125,16 @@ for a stable number.
 
 `--compare-jargon` re-transcribes each excerpt with and without the glossary prompt built
 from that lecture's slides, which measures what the jargon boost is worth.
+
+## 4. Search by picture: no annotation needed
+
+`eval/eval_screenshot.py` measures searching with a picture of a slide. It needs the index
+and the lecture videos, and nothing written by hand: it takes frames at random times
+inside slide segments, never the keyframe that was indexed, and makes three queries from
+each (the frame itself, a simulated phone photo, and a crop). A query is found when a
+result shows the slide the frame came from. It compares the image signal, the OCR signal
+and the two fused, and writes `results/screenshot/metrics.json`, which the web app shows.
+
+```bash
+PYTHONPATH=. python eval/eval_screenshot.py --index index --videos videos --per-lecture 20
+```

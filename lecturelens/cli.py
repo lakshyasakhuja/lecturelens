@@ -156,7 +156,10 @@ def _highlighted(snippet: str, spans) -> Text:
 
 @app.command()
 def search(
-    query: str = typer.Argument(..., help="What you are looking for, in plain English."),
+    query: str | None = typer.Argument(None, help="What you are looking for, in plain English."),
+    picture: Path | None = typer.Option(
+        None, "--picture", "-p", help="Search with a picture of a slide instead of a question."
+    ),
     index_dir: Path = typer.Option(Path("index"), "--index", "-i", help="Index directory."),
     top_k: int = typer.Option(5, "--top-k", "-k", help="How many moments to return."),
     lecture: list[str] | None = typer.Option(
@@ -169,10 +172,14 @@ def search(
     device: str = typer.Option("cpu", help="Device for the query encoders."),
     as_json: bool = typer.Option(False, "--json", help="Print results as JSON."),
 ) -> None:
-    """Find the moments that answer a question."""
+    """Find the moments that answer a question, or where the slide in a picture was shown."""
     setup_logging()
     from lecturelens.search import SearchConfig, Searcher
 
+    if (query is None) == (picture is None):
+        fail("give either a question or --picture, not both")
+    if picture is not None and not picture.is_file():
+        fail(f"picture not found: {picture}")
     loaded = load_index(index_dir)
     chosen = tuple(name.strip() for name in rankers.split(",") if name.strip())
     try:
@@ -186,7 +193,14 @@ def search(
         )
 
     searcher = Searcher(loaded, config, device=device)
-    results = searcher.search(query, top_k=top_k, lectures=lecture, rerank=rerank)
+    if picture is not None:
+        from PIL import Image, ImageOps
+
+        with Image.open(picture) as opened:
+            image = ImageOps.exif_transpose(opened).convert("RGB")
+        results = searcher.search_picture(image, top_k=top_k, lectures=lecture)
+    else:
+        results = searcher.search(query, top_k=top_k, lectures=lecture, rerank=rerank)
 
     if as_json:
         payload = [
@@ -406,7 +420,12 @@ def serve(
     try:
         import uvicorn
 
-        from lecturelens.web.server import create_app, load_benchmark, load_examples
+        from lecturelens.web.server import (
+            create_app,
+            load_benchmark,
+            load_examples,
+            load_picture_benchmark,
+        )
     except ImportError:
         fail("the web app needs extra packages: run `uv sync --extra web --extra models`")
 
@@ -418,6 +437,7 @@ def serve(
         videos_dir=videos,
         examples=load_examples("config/examples.json", loaded.lectures),
         benchmark=load_benchmark("results/test/metrics.json"),
+        picture_benchmark=load_picture_benchmark("results/screenshot/metrics.json"),
         device=device,
     )
     console.print(f"LectureLens is at [bold]http://{host}:{port}[/bold]  (Ctrl+C to stop)")

@@ -2,9 +2,11 @@
 
 [![CI](https://github.com/lakshyasakhuja/lecturelens/actions/workflows/ci.yml/badge.svg)](https://github.com/lakshyasakhuja/lecturelens/actions/workflows/ci.yml)
 
-Semantic search for lecture recordings. Ask a question in plain English, such as *"where did she explain why we need a validation set?"*, and jump straight to that moment in the video.
+**Find the slide. Hear it explained.**
 
-Each result is ranked using three signals: what was **said**, what text was **on the slide**, and what the slide **looked like**.
+Search lecture recordings by asking a question in plain English, such as *"where did she explain why we need a validation set?"*, or by **showing it a picture of a slide**: a phone photo of the projector, a screenshot of the recording, or a crop of the part you are stuck on. It takes you to the moment in the video where that slide was on screen.
+
+Each result is ranked using three signals: what was **said**, what text was **on the slide**, and what the slide **looked like**. Nothing is generated. Every result is the lecture itself, the slide as it was shown and the sentence as it was said, so there is nothing to make up and nothing to check.
 
 ![The LectureLens web app showing results for a question](docs/screenshot.jpg)
 
@@ -23,12 +25,19 @@ $ lecturelens search "the student who memorises last year's exam answers"
    file:///…/demo01.mp4#t=60
 ```
 
+Or with a picture of a slide:
+
+```console
+$ lecturelens search --picture photo-of-the-projector.jpg
+```
+
 ## Status
 
 | Part | State |
 |---|---|
 | Indexing pipeline: slide segmentation, OCR, speech recognition, moments, embeddings | Built. Runs end to end with the real models. |
 | Search: BM25 + dense + image, rank fusion, deduplication, explanations, optional reranker | Built. |
+| Search with a picture of a slide: image similarity + OCR, fused | Built and measured on the five real lectures: the right slide comes first for 70 to 86% of pictures and is in the top five for 92 to 97% ([results](#search-by-picture)). |
 | CLI, resumable and incremental indexing, publishing to Hugging Face | Built. |
 | Evaluation harness: retrieval ablations, slide transitions, word error rate | Built, and exercised end to end on synthetic lectures. |
 | Web app: search page, player, JSON API, container image, Hugging Face Space | Built. `lecturelens serve` runs it on any index. |
@@ -101,6 +110,7 @@ uv run lecturelens serve --index index
 This opens the search page at `http://127.0.0.1:7860`. Add `--videos <folder>` and results play your local recordings inside the page instead of linking out.
 
 - **Search** in plain English, across all lectures or one. The first example question runs on load, so the page shows real results straight away.
+- **Search with a picture** of a slide: the camera button (which opens the camera on a phone), pasting a screenshot anywhere on the page, or dropping a file on it. The picture is matched by how it looks (SigLIP 2's image tower against every keyframe) and by the words OCR reads off it (BM25 over slide text), fused like any other rankers. It is sent once, searched and forgotten.
 - **Results** are tiles: the best answer across the full width, the rest in a grid. Each shows its slide, the words that matched picked out of what was said, badges for the signals that matched, and the rank each signal gave it.
 - **Play** opens the lecture at that moment in a sheet, from YouTube's privacy-enhanced player or from a local file. The app hosts no video.
 - **The library, the pipeline and the benchmark** are described further down the page, with counts read from the index. The benchmark table appears only when a measured `metrics.json` exists; until then the page says so.
@@ -113,7 +123,7 @@ The same app runs as a free Hugging Face Space. The Space's app can also offer a
 |---|---|
 | `lecturelens index <videos>` | Build or update an index. Cached per stage, so it resumes after an interruption and only processes new lectures. |
 | `lecturelens serve` | The web app, for any index. |
-| `lecturelens search "<query>"` | Top moments with timestamps, snippets, badges and links. `--lecture` to filter, `--rerank` for the cross-encoder, `--json` for scripts. |
+| `lecturelens search "<query>"` | Top moments with timestamps, snippets, badges and links. `--picture <file>` to search with a picture of a slide instead, `--lecture` to filter, `--rerank` for the cross-encoder, `--json` for scripts. |
 | `lecturelens info` | What an index contains and which models built it. |
 | `lecturelens slides <video> --sheet out.jpg` | Run slide detection alone and write a contact sheet of keyframes, to check masks and thresholds before indexing. |
 | `lecturelens push / pull <repo>` | Publish or fetch an index as a Hugging Face dataset, with an attribution card. |
@@ -159,6 +169,16 @@ A **moment** is the unit of retrieval: one slide, with the words spoken while it
      (optional) rerank top 20 with Qwen3-Reranker-0.6B
             |
      dedupe into distinct landing points --> top 5, each with an explanation
+```
+
+A picture of a slide takes a shorter path through the same fusion:
+
+```
+ picture
+   +--> SigLIP 2 image tower . image vecs  --> ranking C
+   +--> PP-OCRv5 (mobile) --> BM25 over slide text --> ranking D
+            |
+     Reciprocal Rank Fusion (k = 60) --> dedupe --> top moments
 ```
 
 ### Design notes
@@ -279,7 +299,25 @@ python eval/evaluate.py --split test --tuned results/dev/tuned.json --latency
 
 ### Results
 
-**Not yet available.** This section will hold the ablation table, the per-type chart, latency, the component results and the failure analysis, from measured runs only.
+**Question benchmark: not yet available.** This section will hold the ablation table, the per-type chart, latency, the component results and the failure analysis, from measured runs only.
+
+#### Search by picture
+
+Measured on the five real lectures, with no hand annotation: `eval/eval_screenshot.py` takes 20 frames per lecture at random times inside slides (never the frame that was indexed), and turns each into three kinds of query. A query counts as found when a result shows the slide the frame came from.
+
+| Query | Image only | OCR only | Both, fused (what the app does) |
+|---|---|---|---|
+| Screenshot of the recording | 86% / 94% | 80% / 88% | **86% / 97%** |
+| Simulated phone photo: perspective, margin, colour, blur, JPEG | 70% / 92% | 65% / 78% | **70% / 95%** |
+| Crop of 55 to 75% of the slide | 80% / 91% | 72% / 86% | **78% / 92%** |
+
+<sub>Found first / found in the top five, 100 queries per row, seed 7. Median time per query on an Apple M4 CPU: 0.7 s for the image, 1.2 s for OCR.</sub>
+
+Fusing the two signals mostly helps the top five; the first result is decided by the image. Most misses at rank 1 land on a neighbouring slide. In a check of 60 image-only queries, 4 of the 9 misses were the same slide shown again at another point in the lecture, which this strict count scores as wrong. The phone photos are simulated, not taken with a phone.
+
+```bash
+PYTHONPATH=. python eval/eval_screenshot.py --index index --videos videos --per-lecture 20
+```
 
 <details>
 <summary>Pipeline check on the synthetic demo lectures (not a benchmark)</summary>
@@ -305,7 +343,7 @@ Retrieval metrics are omitted on purpose: with 13 moments nearly everything is i
 
 - **Public demo.** Built on five lectures of [MIT 6.7960 Deep Learning, Fall 2024](https://ocw.mit.edu/courses/6-7960-deep-learning-fall-2024/) by Phillip Isola, Sara Beery and Jeremy Bernstein, from MIT OpenCourseWare, licensed CC BY-NC-SA 4.0. Lectures 4, 6, 8, 9 and 12 were chosen because evenly spaced frames from the official files show typeset slides for 75 to 100 percent of each. The source page, licence and instructors of every lecture are recorded in `config/lectures.csv`. Derived transcripts, slide text and thumbnails are shared under the same licence, for non-commercial use, with that credit. `lecturelens push` generates the attribution card from the index itself. LectureLens is not affiliated with or endorsed by MIT.
 - **Your own lectures.** Indexed locally, for personal study, and never uploaded, hosted or committed here. `.gitignore` excludes video, audio, work directories and indexes.
-- **This repository** contains code only. No lecture video, transcript or slide is included; the screenshot above shows the synthetic demo lectures.
+- **This repository** contains code, and one picture: the example photo of a slide behind the page's "Try it" button, a frame of lecture 6 under CC BY-NC-SA 4.0, credited in [`samples/README.txt`](lecturelens/web/static/samples/README.txt). No lecture video, transcript or other slide is included; the screenshot above shows the synthetic demo lectures.
 
 ## Related work
 
@@ -313,7 +351,9 @@ Retrieval metrics are omitted on purpose: with 13 moments nearly everything is i
 - **Panopto** has searched spoken words and on-screen text via OCR since 2014. ([announcement](https://campustechnology.com/articles/2014/03/25/panopto-adds-video-content-search-to-lecture-capture-platform.aspx))
 - **Cutsio** is a commercial product offering semantic, cross-library lecture search with visual indexing. ([blog](https://cutsio.com/blog/lecture-capture-alternative-for-search-cutsio))
 
-Lecture search already exists. What LectureLens adds is an **open, measured, multimodal system**, with a benchmark that shows which signal helps for which kind of question.
+- **AI study apps**, among them one at lecturelens.app (unrelated to this project, and the reason it was renamed), turn recordings into generated notes, flashcards and practice tests.
+
+Lecture search already exists, and so do apps that write about lectures. Slideseek takes the other side: it **generates nothing** and only points into the lecture itself, it accepts **a picture of a slide as a query**, and it is an **open, measured system**, with benchmarks that show how often each kind of query finds its moment.
 
 ---
 

@@ -1267,6 +1267,11 @@ models = [
     { name = "transformers", version = "5.20.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "transformers", version = "5.23.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
+ocr = [
+    { name = "onnxruntime", version = "1.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "onnxruntime", version = "1.32.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "rapidocr" },
+]
 space = [
     { name = "fastapi", version = "0.162.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "fastapi", version = "0.163.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -1294,18 +1299,18 @@ requires-dist = [
     { name = "faster-whisper", marker = "extra == 'index'", specifier = ">=1.1" },
     { name = "gradio", marker = "extra == 'space'", specifier = ">=6.32,<7" },
     { name = "jiwer", marker = "extra == 'eval'", specifier = ">=3" },
-    { name = "lecturelens", extras = ["models"], marker = "extra == 'index'" },
+    { name = "lecturelens", extras = ["models", "ocr"], marker = "extra == 'index'" },
     { name = "lecturelens", extras = ["web"], marker = "extra == 'space'" },
     { name = "matplotlib", marker = "extra == 'eval'", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "onnxruntime", marker = "extra == 'index'", specifier = ">=1.19" },
+    { name = "onnxruntime", marker = "extra == 'ocr'", specifier = ">=1.19" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pillow", specifier = ">=10.1" },
     { name = "protobuf", marker = "extra == 'models'", specifier = ">=4" },
     { name = "pyarrow", specifier = ">=16" },
     { name = "pystemmer", specifier = ">=2.2" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "rapidocr", marker = "extra == 'index'", specifier = ">=3.2" },
+    { name = "rapidocr", marker = "extra == 'ocr'", specifier = ">=3.2" },
     { name = "rich", specifier = ">=13" },
     { name = "scenedetect", marker = "extra == 'eval'", specifier = ">=0.6.4" },
     { name = "scipy", specifier = ">=1.11" },
@@ -1317,7 +1322,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.30" },
 ]
-provides-extras = ["models", "index", "web", "space", "eval"]
+provides-extras = ["models", "ocr", "index", "web", "space", "eval"]
 
 [package.metadata.requires-dev]
 dev = [

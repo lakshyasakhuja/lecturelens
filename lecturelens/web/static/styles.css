@@ -172,10 +172,15 @@ button {
 
 .hero__headline {
   margin-top: 6px;
-  font-size: clamp(52px, 9.2vw, 104px);
-  line-height: 1.03;
+  font-size: clamp(44px, 8vw, 92px);
+  line-height: 1.04;
   font-weight: 600;
   letter-spacing: -0.02em;
+}
+
+/* Two beats, one per line: the slide, then the explanation. */
+.hero__headline .gradient-text {
+  display: block;
 }
 
 .headline {
@@ -439,6 +444,98 @@ button {
   height: 22px;
 }
 
+/* Searching with a picture: the camera button, the chip that stands for the picture, and
+   the outline shown while a file is dragged over the page. */
+.search__picture {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  margin-right: 6px;
+  border-radius: 50%;
+  color: var(--text-2);
+  transition:
+    background 0.2s,
+    color 0.2s,
+    transform 0.2s var(--ease);
+}
+
+.search__picture:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text);
+}
+
+.search__picture:active {
+  transform: scale(0.94);
+}
+
+.search__picture svg {
+  width: 24px;
+  height: 24px;
+}
+
+.search__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 40px;
+  margin-left: 12px;
+  padding: 4px 6px 4px 4px;
+  border-radius: 20px;
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+
+.search__chip[hidden] {
+  display: none;
+}
+
+.search__chip-image {
+  width: 44px;
+  height: 32px;
+  border-radius: 16px 6px 6px 16px;
+  object-fit: cover;
+  background: var(--field);
+}
+
+.search__chip-label {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.search__chip-clear {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--text-2);
+}
+
+.search__chip-clear:hover {
+  background: var(--field);
+  color: var(--text);
+}
+
+.search__chip-clear svg {
+  width: 12px;
+  height: 12px;
+}
+
+.search.has-picture .search__input::placeholder {
+  color: transparent;
+}
+
+.search.is-dropping .search__field {
+  background: var(--bg);
+  box-shadow:
+    0 0 0 2px var(--accent),
+    var(--shadow);
+}
+
 .search.is-busy .search__submit svg {
   animation: nudge 0.9s var(--ease) infinite;
 }
@@ -479,6 +576,17 @@ kbd {
 @media (max-width: 600px), (hover: none) {
   .search__hint {
     display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .search__chip-label {
+    display: none;
+  }
+
+  .search__picture {
+    width: 40px;
+    margin-right: 2px;
   }
 }
 
@@ -655,6 +763,18 @@ kbd {
 .results__status {
   font-size: 14px;
   color: var(--text-2);
+}
+
+.results__read {
+  flex-basis: 100%;
+  max-width: 760px;
+  font-size: 14px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+.results__read[hidden] {
+  display: none;
 }
 
 .results__grid {
@@ -986,6 +1106,32 @@ kbd {
   margin-top: 18px;
 }
 
+/* A section that is one sentence: centred, with room around it. */
+.section--statement {
+  text-align: center;
+}
+
+.section--statement .lead {
+  margin: 22px auto 0;
+  max-width: 720px;
+}
+
+/* ---------------------------------------------------------------- pictures */
+
+.pictures__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 24px;
+  margin-top: 36px;
+}
+
+.pictures__note {
+  font-size: 14px;
+  color: var(--text-2);
+  max-width: 560px;
+}
+
 /* ---------------------------------------------------------------- bento */
 
 .bento {
@@ -1057,6 +1203,7 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
+#pictures .stat__value,
 .tile--narrow .stat__value {
   background: linear-gradient(92deg, #0a84ff, #5e5ce6 50%, #bf5af2);
   -webkit-background-clip: text;

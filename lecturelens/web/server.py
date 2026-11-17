@@ -3,6 +3,7 @@
     GET /api/health                 is the server up, and are the encoders loaded?
     GET /api/info                   what the index contains: lectures, counts, models, examples
     GET /api/search?q=...           the top moments for a query
+    POST /api/search/picture        the moments where the slide in a picture was shown
     GET /thumbs/<lecture>/<ms>.jpg  slide thumbnails, straight from the index directory
     GET /                           the frontend (plain HTML, CSS and JavaScript, no build step)
 
@@ -20,6 +21,7 @@ which is how the Hugging Face Space runs them on Gradio's server: see ``space.py
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import threading
@@ -29,18 +31,23 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from lecturelens import __version__
 from lecturelens.catalog import VIDEO_EXTENSIONS, Lecture
 from lecturelens.index import Index
-from lecturelens.search import Result, Searcher
+from lecturelens.search import PICTURE_RANKERS, Result, Searcher
 from lecturelens.utils import format_timestamp, read_json
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_QUERY_CHARS = 300
 MAX_RESULTS = 20
+# A picture query: what is accepted, and the size it is scaled down to before searching.
+MAX_PICTURE_BYTES = 8 * 1024 * 1024
+MAX_PICTURE_PIXELS = 40_000_000
+PICTURE_SIDE = 1600
 
 
 class BadRequest(ValueError):
@@ -55,7 +62,8 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "default-src 'self'",
         "script-src 'self'",
         "style-src 'self'",
-        "img-src 'self' data: https://i.ytimg.com",
+        # blob: is the visitor's own picture, previewed before it is searched.
+        "img-src 'self' data: blob: https://i.ytimg.com",
         "media-src 'self'",
         "frame-src https://www.youtube-nocookie.com",
         "base-uri 'none'",
@@ -64,6 +72,37 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "frame-ancestors 'self' https://huggingface.co https://*.hf.space",
     ]
 )
+
+
+def load_picture(data: bytes):
+    """Decode an uploaded picture, upright and in RGB, no larger than ``PICTURE_SIDE``."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    if not data:
+        raise BadRequest("The picture is empty.")
+    if len(data) > MAX_PICTURE_BYTES:
+        raise BadRequest("The picture is larger than 8 MB.")
+    try:
+        with Image.open(io.BytesIO(data)) as probe:
+            width, height = probe.size
+            if width * height > MAX_PICTURE_PIXELS:
+                raise BadRequest("The picture has too many pixels.")
+            probe.verify()
+        with Image.open(io.BytesIO(data)) as opened:
+            # A phone photo is stored sideways with a note saying which way is up.
+            picture = ImageOps.exif_transpose(opened).convert("RGB")
+    except BadRequest:
+        raise
+    except (
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError,
+        ValueError,
+        Image.DecompressionBombError,
+    ) as error:
+        raise BadRequest("That file is not a picture this app can read.") from error
+    picture.thumbnail((PICTURE_SIDE, PICTURE_SIDE))
+    return picture
 
 
 def youtube_id(lecture: Lecture) -> str | None:
@@ -135,6 +174,14 @@ def load_benchmark(path: str | Path | None) -> dict[str, Any] | None:
     }
 
 
+def load_picture_benchmark(path: str | Path | None) -> dict[str, Any] | None:
+    """The measured picture search, as written by ``eval/eval_screenshot.py``, if it exists."""
+    if not path or not Path(path).is_file():
+        return None
+    metrics = read_json(path)
+    return {key: metrics.get(key) for key in ("queries", "lectures", "methods", "median_seconds")}
+
+
 def create_app(
     index: Index,
     searcher: Searcher | None = None,
@@ -142,6 +189,7 @@ def create_app(
     videos_dir: str | Path | None = None,
     examples: Sequence[Mapping[str, str]] = (),
     benchmark: Mapping[str, Any] | None = None,
+    picture_benchmark: Mapping[str, Any] | None = None,
     device: str = "cpu",
     warm_up: bool = True,
     app: FastAPI | None = None,
@@ -163,6 +211,7 @@ def create_app(
         with lock:
             try:
                 searcher.warm_up()
+                searcher.warm_up_pictures()
             finally:
                 ready.set()
 
@@ -265,6 +314,11 @@ def create_app(
             "examples": list(examples),
             "benchmark": benchmark,
             "rerank": rerank,
+            "pictures": {
+                "read_text": searcher.can_read_pictures,
+                "max_bytes": MAX_PICTURE_BYTES,
+                "benchmark": picture_benchmark,
+            },
         }
 
     def run_search(
@@ -306,6 +360,61 @@ def create_app(
         return payload
 
     app.state.run_search = run_search
+
+    def check_request(k: int, lecture: Sequence[str] | None) -> None:
+        if not 1 <= k <= MAX_RESULTS:
+            raise BadRequest(f"Ask for between 1 and {MAX_RESULTS} moments.")
+        unknown = sorted(set(lecture or []) - set(index.lectures))
+        if unknown:
+            raise BadRequest(f"Unknown lecture: {', '.join(unknown)}")
+
+    def run_picture_search(
+        data: bytes, k: int = 5, lecture: Sequence[str] | None = None
+    ) -> dict[str, Any]:
+        """Answer a picture query. Raises ``BadRequest`` for a picture that cannot be used."""
+        check_request(k, lecture)
+        picture = load_picture(data)
+        was_ready = ready.is_set()
+        with lock:
+            started = time.perf_counter()
+            encoding = searcher.encode_picture(picture, read_text=searcher.can_read_pictures)
+            rankers = PICTURE_RANKERS if encoding.terms else ("image",)
+            order, scores, per_ranker = searcher.fuse(
+                encoding, rankers, mask=searcher.lecture_mask(lecture or None)
+            )
+            took_ms = (time.perf_counter() - started) * 1000.0
+        results = searcher.results(order, scores, encoding, per_ranker, k)
+        return {
+            "kind": "picture",
+            "read": " ".join(encoding.query.split())[:200],
+            "took_ms": round(took_ms, 1),
+            "warm": was_ready,
+            "reranked": False,
+            "count": len(results),
+            "results": [serialise(result) for result in results],
+        }
+
+    app.state.run_picture_search = run_picture_search
+
+    @app.post("/api/search/picture")
+    async def search_picture(
+        request: Request,
+        k: int = Query(5, ge=1, le=MAX_RESULTS, description="How many moments to return."),
+        lecture: list[str] | None = Query(None, description="Restrict to these lecture ids."),
+    ) -> dict[str, Any]:
+        """The request body is the picture itself: PNG, JPEG, WebP or GIF."""
+        if not request.headers.get("content-type", "").startswith("image/"):
+            raise HTTPException(status_code=415, detail="Send the picture as an image file.")
+        size, chunks = 0, []
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_PICTURE_BYTES:
+                raise HTTPException(status_code=413, detail="The picture is larger than 8 MB.")
+            chunks.append(chunk)
+        try:
+            return await run_in_threadpool(run_picture_search, b"".join(chunks), k, lecture)
+        except BadRequest as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @app.get("/api/search")
     def search(
@@ -380,6 +489,8 @@ def create_app_from_env() -> FastAPI:
     ``LECTURELENS_VIDEOS``      directory of local recordings to play instead of linking out
     ``LECTURELENS_EXAMPLES``    example queries (default ``config/examples.json``)
     ``LECTURELENS_BENCHMARK``   benchmark metrics (default ``results/test/metrics.json``)
+    ``LECTURELENS_PICTURE_BENCHMARK``  picture search metrics
+                                (default ``results/screenshot/metrics.json``)
     ``LECTURELENS_DEVICE``      device for the query encoders (default ``cpu``)
     """
     from lecturelens.logs import configure_logging
@@ -394,6 +505,9 @@ def create_app_from_env() -> FastAPI:
         ),
         benchmark=load_benchmark(
             os.environ.get("LECTURELENS_BENCHMARK", "results/test/metrics.json")
+        ),
+        picture_benchmark=load_picture_benchmark(
+            os.environ.get("LECTURELENS_PICTURE_BENCHMARK", "results/screenshot/metrics.json")
         ),
         device=os.environ.get("LECTURELENS_DEVICE", "cpu"),
     )

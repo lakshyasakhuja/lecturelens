@@ -10,6 +10,10 @@ sentence-transformers>=5.0
 sentencepiece>=0.2
 protobuf>=4
 
+# Reading the words off a picture of a slide.
+rapidocr>=3.2
+onnxruntime>=1.19
+
 numpy>=1.26
 pandas>=2.2
 pyarrow>=16

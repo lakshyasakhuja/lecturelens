@@ -164,14 +164,20 @@ class ImageEmbedder:
         return float(model.logit_scale.detach().exp()), float(model.logit_bias.detach())
 
     def encode_images(self, paths: Sequence[str | Path]) -> np.ndarray:
-        import torch
+        """Embed image files."""
         from PIL import Image
+
+        return self.encode_pictures([Image.open(path) for path in paths])
+
+    def encode_pictures(self, pictures: Sequence) -> np.ndarray:
+        """Embed PIL images, in the same space as keyframes and as text queries."""
+        import torch
 
         model, processor = self._load()
         chunks = []
         size = self.config.image_batch_size
-        for start in range(0, len(paths), size):
-            images = [Image.open(path).convert("RGB") for path in paths[start : start + size]]
+        for start in range(0, len(pictures), size):
+            images = [picture.convert("RGB") for picture in pictures[start : start + size]]
             inputs = processor(images=images, return_tensors="pt").to(self.device)
             inputs = {
                 k: v.to(model.dtype) if v.is_floating_point() else v for k, v in inputs.items()

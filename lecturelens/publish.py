@@ -155,9 +155,10 @@ def stage_space(dest: str | Path, root: str | Path = ".") -> Path:
     """Assemble the files a Space runs from, in ``dest``. Returns ``dest``.
 
     A Gradio Space does not install this package; it runs ``app.py`` beside a copy of it.
-    So the Space gets the package's source, the example questions, the measured benchmark
-    if there is one, and its own three files from ``deploy/space``. No video, no index and
-    nothing binary: the index is fetched from its dataset repository when the Space starts.
+    So the Space gets the package's source (with the page and its one example photo), the
+    example questions, the measured benchmarks if there are any, and its own three files
+    from ``deploy/space``. No video and no index: the index is fetched from its dataset
+    repository when the Space starts.
     """
     dest, root = Path(dest), Path(root)
     source = root / "deploy" / "space"
@@ -175,7 +176,11 @@ def stage_space(dest: str | Path, root: str | Path = ".") -> Path:
     )
     for name in SPACE_FILES:
         shutil.copy2(source / name, dest / name)
-    for optional in ("config/examples.json", "results/test/metrics.json"):
+    for optional in (
+        "config/examples.json",
+        "results/test/metrics.json",
+        "results/screenshot/metrics.json",
+    ):
         if (root / optional).is_file():
             (dest / optional).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(root / optional, dest / optional)

@@ -1,8 +1,9 @@
-/* LectureLens frontend.
+/* Slideseek frontend.
  *
- * Plain JavaScript and no build step. Everything shown comes from two endpoints:
- * /api/info (what the index contains) and /api/search (the moments for a query). Where the
- * server offers it, a third call reranks the results on a GPU; see "reranking" below.
+ * Plain JavaScript and no build step. Everything shown comes from three endpoints:
+ * /api/info (what the index contains), /api/search (the moments for a question) and
+ * /api/search/picture (the moments for a picture of a slide). Where the server offers it,
+ * one more call reranks the results on a GPU; see "reranking" below.
  * Text from the server is only ever inserted as text nodes, never as HTML.
  */
 (() => {
@@ -24,18 +25,26 @@
   const template = $("result-template");
   const player = $("player");
   const playerFrame = $("player-frame");
+  const read = $("read");
+  const pictureInput = $("picture-input");
+  const pictureButton = $("picture-button");
+  const pictureChip = $("picture-chip");
+  const picturePreview = $("picture-preview");
+  const pictureClear = $("picture-clear");
 
   const BADGES = {
     said: { label: "Said", kind: "said" },
     "on slide": { label: "On slide", kind: "slide" },
     visual: { label: "Visual", kind: "visual" },
   };
-  const RANKERS = { bm25: "keyword", dense: "meaning", image: "picture" };
+  const RANKERS = { bm25: "keyword", dense: "meaning", image: "picture", bm25_slide: "slide text" };
+  const PICTURE_VARIANTS = { photo: "phone photos", frame: "screenshots", crop: "crops" };
   const QUERY_KINDS = { keyword: "Keyword", paraphrase: "Paraphrase", spoken: "Spoken", visual: "Visual" };
   const SVG_NS = "http://www.w3.org/2000/svg";
 
   let info = null;
   let inFlight = null;
+  let picture = null; // { file, url } while a picture is the query
 
   /* ------------------------------------------------------------ helpers */
 
@@ -303,7 +312,16 @@
 
     const where = lectureSelect.value ? ` in ${lectureSelect.selectedOptions[0].textContent}` : "";
     const reranked = data.reranked ? ` · reranked in ${(data.rerank_ms / 1000).toFixed(1)} s` : "";
-    status.textContent = `${plural(data.count, "moment")}${where} · ${Math.round(data.took_ms)} ms${reranked}`;
+    const took = data.took_ms >= 1000 ? `${(data.took_ms / 1000).toFixed(1)} s` : `${Math.round(data.took_ms)} ms`;
+    status.textContent = `${plural(data.count, "moment")}${where} · ${took}${reranked}`;
+    if (data.kind === "picture") {
+      read.textContent = data.read
+        ? `Matched by how it looks, and by the words read off it: “${data.read}”`
+        : "Matched by how it looks. No words could be read off it.";
+      read.hidden = false;
+      return;
+    }
+    read.hidden = true;
     // A search that ran while the models were still loading says nothing about speed.
     if (data.warm) {
       $("stat-latency").textContent = `${Math.round(data.took_ms)} ms`;
@@ -352,6 +370,7 @@
   async function search(rawQuery, { push = false, scroll = false } = {}) {
     const query = rawQuery.trim().replace(/\s+/g, " ");
     if (!query) return;
+    clearPicture();
 
     if (inFlight) inFlight.abort();
     inFlight = new AbortController();
@@ -384,6 +403,173 @@
       status.textContent = error.message || "Something went wrong. Try again.";
     } finally {
       if (!signal.aborted) form.classList.remove("is-busy");
+    }
+  }
+
+  /* ------------------------------------------------------------ pictures
+   *
+   * A picture is sent as the body of one POST and never kept: the server searches with it
+   * and forgets it. The page shows it back to the visitor from memory (a blob: URL).
+   */
+
+  function showPicture(file) {
+    if (picture) URL.revokeObjectURL(picture.url);
+    picture = { file, url: URL.createObjectURL(file) };
+    picturePreview.src = picture.url;
+    pictureChip.hidden = false;
+    form.classList.add("has-picture");
+    input.value = "";
+  }
+
+  function clearPicture() {
+    if (!picture) return;
+    URL.revokeObjectURL(picture.url);
+    picture = null;
+    picturePreview.removeAttribute("src");
+    pictureChip.hidden = true;
+    form.classList.remove("has-picture");
+    pictureInput.value = "";
+  }
+
+  function pictureProblem(file) {
+    if (!file || !file.type.startsWith("image/")) return "That file is not a picture.";
+    const limit = info && info.pictures ? info.pictures.max_bytes : 8 * 1024 * 1024;
+    if (file.size > limit) return `The picture is larger than ${Math.round(limit / 1024 / 1024)} MB.`;
+    return null;
+  }
+
+  async function searchPicture(file, { scroll = true } = {}) {
+    const problem = pictureProblem(file);
+    resultsSection.hidden = false;
+    if (problem) {
+      resultsTitle.textContent = "Your picture";
+      grid.textContent = "";
+      read.hidden = true;
+      status.textContent = problem;
+      return;
+    }
+    if (inFlight) inFlight.abort();
+    inFlight = new AbortController();
+    const { signal } = inFlight;
+
+    showPicture(file);
+    // A picture cannot live in the address bar; leave no stale question there either.
+    if (location.search) history.pushState({ picture: true }, "", location.pathname);
+    const lecture = lectureSelect.value;
+    const params = new URLSearchParams({ k: "6" });
+    if (lecture) params.set("lecture", lecture);
+
+    resultsTitle.textContent = "Your picture";
+    status.textContent = info && !info.ready ? "Warming up the models. The first search takes a few seconds." : "Looking at your picture";
+    read.hidden = true;
+    empty.hidden = true;
+    showSkeletons();
+    form.classList.add("is-busy");
+    if (scroll) resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    try {
+      const response = await fetch(`/api/search/picture?${params}`, {
+        method: "POST",
+        body: file,
+        headers: { "Content-Type": file.type, Accept: "application/json" },
+        signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "The picture could not be searched.");
+      if (info) info.ready = true;
+      renderResults(data);
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      grid.textContent = "";
+      status.textContent = error.message || "Something went wrong. Try again.";
+    } finally {
+      if (!signal.aborted) form.classList.remove("is-busy");
+    }
+  }
+
+  function imageFrom(items) {
+    for (const item of items || []) {
+      const file = item.kind === "file" ? item.getAsFile() : item;
+      if (file && file.type && file.type.startsWith("image/")) return file;
+    }
+    return null;
+  }
+
+  pictureButton.addEventListener("click", () => pictureInput.click());
+  pictureInput.addEventListener("change", () => {
+    const file = pictureInput.files && pictureInput.files[0];
+    if (file) searchPicture(file);
+  });
+  pictureClear.addEventListener("click", () => {
+    clearPicture();
+    input.focus();
+  });
+
+  // Paste a screenshot anywhere on the page. Text pasted into a field is left alone.
+  document.addEventListener("paste", (event) => {
+    const file = imageFrom(event.clipboardData && event.clipboardData.items);
+    if (!file) return;
+    event.preventDefault();
+    searchPicture(file);
+  });
+
+  // Drop a picture anywhere; the search box lights up while one is dragged over the page.
+  let dragDepth = 0;
+  const carriesFiles = (event) => event.dataTransfer && [...event.dataTransfer.types].includes("Files");
+  document.addEventListener("dragenter", (event) => {
+    if (!carriesFiles(event)) return;
+    dragDepth += 1;
+    form.classList.add("is-dropping");
+  });
+  document.addEventListener("dragleave", () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) form.classList.remove("is-dropping");
+  });
+  document.addEventListener("dragover", (event) => {
+    if (carriesFiles(event)) event.preventDefault();
+  });
+  document.addEventListener("drop", (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    form.classList.remove("is-dropping");
+    const file = imageFrom(event.dataTransfer.files);
+    if (file) searchPicture(file);
+    else {
+      resultsSection.hidden = false;
+      resultsTitle.textContent = "Your picture";
+      status.textContent = "That file is not a picture.";
+    }
+  });
+
+  $("picture-example").addEventListener("click", async () => {
+    const response = await fetch("/samples/slide-photo.jpg");
+    if (!response.ok) return;
+    const blob = await response.blob();
+    searchPicture(new File([blob], "slide-photo.jpg", { type: blob.type || "image/jpeg" }));
+  });
+
+  /* Measured figures for each kind of picture, if the server has them. */
+  function renderPictureBenchmark() {
+    const measured = info.pictures && info.pictures.benchmark;
+    const both = measured && measured.methods && measured.methods.both;
+    for (const node of document.querySelectorAll("[data-variant]")) {
+      const figures = both && both[node.dataset.variant];
+      const label = document.querySelector(`[data-variant-label="${node.dataset.variant}"]`);
+      if (!figures) {
+        node.hidden = true;
+        label.hidden = true;
+        continue;
+      }
+      node.textContent = `${Math.round(100 * figures["hit@1"])}%`;
+      label.textContent =
+        `of ${PICTURE_VARIANTS[node.dataset.variant]} found the slide first, ` +
+        `${Math.round(100 * figures["hit@5"])}% in the top five`;
+    }
+    if (measured) {
+      $("picture-note").textContent =
+        `Measured on ${measured.queries.toLocaleString()} pictures made from frames of ${plural(measured.lectures.length, "lecture")}, ` +
+        "never the frame that was indexed. “Found first” means the top result shows that slide.";
     }
   }
 
@@ -428,12 +614,17 @@
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!input.value.trim() && picture) {
+      searchPicture(picture.file, { scroll: true });
+      return;
+    }
     search(input.value, { push: true, scroll: true });
     input.blur();
   });
 
   lectureSelect.addEventListener("change", () => {
-    if (input.value.trim()) search(input.value, { push: true });
+    if (picture) searchPicture(picture.file, { scroll: false });
+    else if (input.value.trim()) search(input.value, { push: true });
   });
 
   rerankToggle.addEventListener("change", () => {
@@ -526,6 +717,7 @@
       return;
     }
     rerankOption.hidden = !info.rerank;
+    renderPictureBenchmark();
     renderStats();
     renderLectureFilter();
     renderExamples();

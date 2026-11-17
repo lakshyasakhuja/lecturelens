@@ -27,7 +27,7 @@ RUN pip install --user torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY --chown=user pyproject.toml README.md ./
 COPY --chown=user lecturelens ./lecturelens
-RUN pip install --user ".[models,web]"
+RUN pip install --user ".[models,ocr,web]"
 
 # Fetch the two query encoders at build time, so a cold start does not begin with a
 # three-gigabyte download.

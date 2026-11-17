@@ -175,9 +175,21 @@ class OcrEngine:
             )
         return self._engine
 
-    def read(self, image_path: str | Path) -> SlideText:
-        """OCR one image and return its lines in reading order."""
-        result = self._load()(str(image_path))
+    def read(self, image: str | Path | Any) -> SlideText:
+        """OCR one image and return its lines in reading order.
+
+        ``image`` is a path, a PIL image or an RGB array.
+        """
+        if isinstance(image, (str, Path)):
+            source = str(image)
+        else:
+            import numpy as np
+
+            # RapidOCR reads arrays as OpenCV does, in BGR order.
+            source = np.ascontiguousarray(
+                np.asarray(image.convert("RGB") if hasattr(image, "convert") else image)[..., ::-1]
+            )
+        result = self._load()(source)
         if result.txts is None or result.boxes is None:
             return SlideText()
         lines = []

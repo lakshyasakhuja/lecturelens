@@ -25,15 +25,21 @@ keyframe, and the text rankers decide between them.
 ``dedupe_window_s`` of each other would drop the student at the same place, so only the
 better one is kept.
 
-Everything here runs on a CPU. The only models involved are the two query encoders; the
-index side is matrix products over a few thousand rows.
+**A picture is a query too.** A screenshot or a photo of a slide is ranked two ways: by
+SigLIP's image tower against every keyframe (what the slide looks like), and by BM25 over
+slide text, with the words read off the picture by OCR (what the slide says). The two are
+fused like any other rankers. ``eval/eval_screenshot.py`` measures how often it finds the
+right slide.
+
+Everything here runs on a CPU. The only models involved are the two query encoders, and
+OCR for a picture; the index side is matrix products over a few thousand rows.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -53,6 +59,8 @@ LEXICAL_FIELDS = {
 DENSE_VECTORS = {"dense": "text", "dense_speech": "speech", "dense_slide": "slide"}
 RANKERS = (*LEXICAL_FIELDS, *DENSE_VECTORS, "image")
 DEFAULT_RANKERS = ("bm25", "dense", "image")
+# A picture is matched on what it looks like and on the words that can be read off it.
+PICTURE_RANKERS = ("image", "bm25_slide")
 
 # Badges. A source (speech or slide) is named as a match when it contains at least this
 # share of the query's terms, and at least this fraction of what the other source contains.
@@ -80,6 +88,11 @@ class SearchConfig:
     # not ranked at all, the way BM25 does not rank a moment that shares no term with the
     # query. 0 disables it, so every keyframe is ranked (plain RRF, the default).
     image_min_prob: float = 0.0
+    # A result of a picture query is badged "visual" when its keyframe and the picture are
+    # at least this similar in SigLIP's image space (cosine). In the screenshot evaluation
+    # (eval/eval_screenshot.py) the right keyframe scored 0.82 or more for 95 per cent of
+    # pictures; so did near-duplicates of it, which is why this is a badge, not a filter.
+    picture_min_similarity: float = 0.85
 
     def __post_init__(self) -> None:
         unknown = set(self.rankers) - set(RANKERS)
@@ -97,6 +110,12 @@ class QueryEncoding:
     terms: tuple[str, ...]
     dense: np.ndarray | None = None
     image: np.ndarray | None = None
+    # "text" for a typed question; "picture" when ``image`` came from SigLIP's image tower
+    # and ``terms`` (if any) were read off the picture.
+    kind: str = "text"
+
+    def with_terms(self, terms: Sequence[str]) -> QueryEncoding:
+        return replace(self, terms=tuple(terms))
 
 
 @dataclass(frozen=True)
@@ -231,6 +250,7 @@ class Searcher:
         image_embedder: ImageEmbedder | None = None,
         reranker=None,
         device: str = "cpu",
+        ocr=None,
     ) -> None:
         self.index = index
         self.config = config or SearchConfig()
@@ -261,6 +281,7 @@ class Searcher:
             for name, vec in DENSE_VECTORS.items()
         }
         self._bm25: dict[str, object] = {}
+        self._ocr = ocr  # anything with read(picture).text; PP-OCRv5 by default
 
     # ---- encoders ----------------------------------------------------------------------
 
@@ -275,6 +296,16 @@ class Searcher:
         if self._image_embedder is None:
             self._image_embedder = ImageEmbedder(self.embed_config)
         return self._image_embedder
+
+    @property
+    def ocr(self):
+        """The OCR engine that reads a picture query. Loads on first use."""
+        if self._ocr is None:
+            from lecturelens.ocr import OcrConfig, OcrEngine
+
+            # The mobile detector: a query is one picture, and a person is waiting for it.
+            self._ocr = OcrEngine(OcrConfig(detector="mobile"))
+        return self._ocr
 
     def warm_up(self, rankers: Sequence[str] | None = None) -> None:
         """Load whatever the given rankers need, so the first real query is not slow."""
@@ -292,6 +323,56 @@ class Searcher:
         if "image" in rankers:
             image = self.image_embedder.encode_texts([query])[0]
         return QueryEncoding(query=query, terms=tuple(analyze(query)), dense=dense, image=image)
+
+    @property
+    def can_read_pictures(self) -> bool:
+        """Is OCR installed, so that a picture query is matched on its words too?"""
+        if self._ocr is not None:
+            return True
+        import importlib.util
+
+        return importlib.util.find_spec("rapidocr") is not None
+
+    def encode_picture(self, picture, read_text: bool = True) -> QueryEncoding:
+        """Encode a picture of a slide: its look, and the words read off it.
+
+        The encoding's ``query`` is the text read off the picture ("" without OCR).
+        """
+        image = self.image_embedder.encode_pictures([picture])[0]
+        text = self.read_picture(picture) if read_text else ""
+        return QueryEncoding(query=text, terms=tuple(analyze(text)), image=image, kind="picture")
+
+    def read_picture(self, picture) -> str:
+        """The text OCR finds in a picture, in reading order; "" if OCR is not installed."""
+        if not self.can_read_pictures:
+            return ""
+        return self.ocr.read(picture).text
+
+    def read_picture_text(self, picture) -> tuple[str, ...]:
+        """The analysed terms of the text OCR finds in a picture."""
+        return tuple(analyze(self.read_picture(picture)))
+
+    def warm_up_pictures(self) -> None:
+        """Load what a picture query needs: the image tower, and OCR if it is installed."""
+        from PIL import Image
+
+        blank = Image.new("RGB", (64, 48), "white")
+        self.encode_picture(blank, read_text=self.can_read_pictures)
+
+    def search_picture(
+        self,
+        picture,
+        top_k: int | None = None,
+        lectures: Iterable[str] | None = None,
+        read_text: bool = True,
+    ) -> list[Result]:
+        """The moments where a slide like this one was shown."""
+        if len(self.index) == 0:
+            return []
+        encoding = self.encode_picture(picture, read_text=read_text)
+        rankers = PICTURE_RANKERS if encoding.terms else ("image",)
+        order, scores, per_ranker = self.fuse(encoding, rankers, mask=self.lecture_mask(lectures))
+        return self.results(order, scores, encoding, per_ranker, top_k)
 
     # ---- individual rankers ----------------------------------------------------------------
 
@@ -337,7 +418,10 @@ class Searcher:
                 raise ValueError("query was not encoded for 'image'")
             similarity = (self.index.image @ encoding.image).astype(np.float64)
             floor = self.config.image_min_prob if image_min_prob is None else image_min_prob
-            if floor > 0 and self._image_scale is not None and self._image_bias is not None:
+            # The calibration turns a text-to-image similarity into a probability; it means
+            # nothing for a picture compared with a picture.
+            calibrated = self._image_scale is not None and self._image_bias is not None
+            if encoding.kind == "text" and floor > 0 and calibrated:
                 logit = self._image_scale * similarity + self._image_bias
                 similarity = np.where(logit >= np.log(floor / (1 - floor)), similarity, -np.inf)
             return similarity[self._image_idx]
@@ -429,11 +513,35 @@ class Searcher:
         can call it for either ranking.
         """
         top_k = top_k or self.config.top_k
+        if encoding.kind == "picture":
+            order, scores = self._first_window_per_slide(order, scores)
         kept = dedupe(order, self._lecture_ids, self._starts, self.config.dedupe_window_s, top_k)
         return [
             self._explain(position, row, scores[row], encoding, per_ranker)
             for position, row in enumerate(kept, start=1)
         ]
+
+    def _first_window_per_slide(
+        self, order: Sequence[int], scores: Mapping[int, float]
+    ) -> tuple[list[int], dict[int, float]]:
+        """One result per slide, landing where the slide first appeared.
+
+        A slide that stays up for minutes is cut into windows. For a question, the words
+        spoken in each window tell them apart; for a picture they are the same slide, so
+        they collapse into the earliest window, which is where the slide came on screen.
+        """
+        first: dict[int, int] = {}
+        for row in range(len(self._image_idx)):
+            first.setdefault(int(self._image_idx[row]), row)  # moments are in time order
+        seen: set[int] = set()
+        merged, merged_scores = [], dict(scores)
+        for row in order:
+            keyframe = int(self._image_idx[row])
+            if keyframe not in seen:
+                seen.add(keyframe)
+                merged.append(first[keyframe])
+                merged_scores.setdefault(first[keyframe], scores[row])
+        return merged, merged_scores
 
     def rerank(
         self, query: str, order: list[int], scores: dict[int, float]
@@ -514,6 +622,13 @@ class Searcher:
         """
         depth = self.config.badge_depth
         terms = set(encoding.terms)
+        if encoding.kind == "picture":
+            # Nothing was said by the person searching: only the slide can match the words.
+            slide_cover = len(terms & set(analyze(slide_text))) / len(terms) if terms else 0.0
+            badges = ["on slide"] if slide_cover >= MIN_COVERAGE else []
+            if signals.get("image", depth + 1) <= depth and self._looks_like(row, encoding):
+                badges.append("visual")
+            return tuple(badges)
         speech_cover = len(terms & set(analyze(transcript))) / len(terms) if terms else 0.0
         slide_cover = len(terms & set(analyze(slide_text))) / len(terms) if terms else 0.0
         best = max(speech_cover, slide_cover)
@@ -546,9 +661,17 @@ class Searcher:
         """
         if encoding.image is None or self._image_scale is None or self._image_bias is None:
             return None
+        if encoding.kind == "picture":
+            return None
         similarity = float(self.index.image[self._image_idx[row]] @ encoding.image)
         return float(1.0 / (1.0 + np.exp(-(self._image_scale * similarity + self._image_bias))))
 
+    def picture_similarity(self, row: int, encoding: QueryEncoding) -> float:
+        """Cosine similarity of a picture query and this moment's keyframe."""
+        return float(self.index.image[self._image_idx[row]] @ encoding.image)
+
     def _looks_like(self, row: int, encoding: QueryEncoding) -> bool:
+        if encoding.kind == "picture":
+            return self.picture_similarity(row, encoding) >= self.config.picture_min_similarity
         probability = self.match_probability(row, encoding)
         return probability is None or probability >= self.config.visual_min_prob

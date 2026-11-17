@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("fastapi", reason="the web extra is not installed")
 
-from fakes import FakeImageEmbedder, FakeTextEmbedder, make_index
+from fakes import FakeImageEmbedder, FakePictureOcr, FakeTextEmbedder, make_index, make_picture
 from fastapi.testclient import TestClient
 
 from lecturelens.catalog import Lecture
@@ -55,7 +55,12 @@ def make_client(tmp_path, *, with_thumbs=False, videos=False, benchmark=None):
         videos_dir.mkdir()
         (videos_dir / "lec02.mp4").write_bytes(b"not really a video")
         (videos_dir / "unrelated.mp4").write_bytes(b"x")
-    searcher = Searcher(index, text_embedder=FakeTextEmbedder(), image_embedder=FakeImageEmbedder())
+    searcher = Searcher(
+        index,
+        text_embedder=FakeTextEmbedder(),
+        image_embedder=FakeImageEmbedder(),
+        ocr=FakePictureOcr(),
+    )
     app = create_app(
         index,
         searcher,
@@ -440,3 +445,72 @@ def test_the_script_loads_the_gradio_client_from_this_origin_only():
     vendored = (STATIC_DIR / "vendor" / "gradio-client.js").read_text(encoding="utf-8")
     assert vendored.startswith("/* Gradio JavaScript client, @gradio/client ")
     assert "eval(" not in vendored and "new Function" not in vendored
+
+
+# ---- searching with a picture ------------------------------------------------------------------
+
+
+def post_picture(client, data, content_type="image/png", **params):
+    return client.post(
+        "/api/search/picture", content=data, headers={"Content-Type": content_type}, params=params
+    )
+
+
+def test_a_picture_finds_the_moment_its_slide_was_shown(client):
+    reply = post_picture(client, make_picture("plot two curves rising falling", "Overfitting"))
+    assert reply.status_code == 200
+    body = reply.json()
+    assert body["kind"] == "picture" and body["read"] == "Overfitting"
+    top = body["results"][0]
+    assert top["moment_id"] == "lec01:0002"
+    assert set(top["badges"]) == {"on slide", "visual"}
+    assert top["signals"] == {"image": 1, "bm25_slide": 1}
+
+
+def test_a_picture_search_can_be_limited_to_a_lecture(client):
+    body = post_picture(
+        client, make_picture("plot two curves", "Overfitting"), lecture="lec02"
+    ).json()
+    assert body["count"] >= 1 and {r["lecture_id"] for r in body["results"]} == {"lec02"}
+
+
+def test_what_is_not_a_usable_picture_is_refused_clearly(client):
+    assert post_picture(client, b"").status_code == 400
+    assert "not a picture" in post_picture(client, b"plain text, not a png").json()["detail"]
+    assert post_picture(client, make_picture("x"), content_type="text/plain").status_code == 415
+    unknown = post_picture(client, make_picture("x"), lecture="nope")
+    assert unknown.status_code == 400 and "Unknown lecture" in unknown.json()["detail"]
+    assert post_picture(client, make_picture("x"), k=0).status_code == 422
+
+
+def test_a_picture_over_the_size_limit_is_refused(client, monkeypatch):
+    import lecturelens.web.server as server
+
+    monkeypatch.setattr(server, "MAX_PICTURE_BYTES", 1000)
+    reply = post_picture(client, make_picture("x", size=(800, 600)) + b"\0" * 2000)
+    assert reply.status_code == 413
+
+
+def test_an_uploaded_photo_is_turned_upright_and_scaled_down():
+    import io
+
+    from PIL import Image
+
+    from lecturelens.web.server import PICTURE_SIDE, load_picture
+
+    exif = Image.Exif()
+    exif[0x0112] = 6  # stored sideways: rotate 90 degrees to show it upright
+    buffer = io.BytesIO()
+    Image.new("RGB", (3200, 1800), "white").save(buffer, "JPEG", exif=exif)
+    picture = load_picture(buffer.getvalue())
+    assert picture.mode == "RGB"
+    assert picture.size[1] > picture.size[0], "the sideways photo is now portrait"
+    assert max(picture.size) == PICTURE_SIDE
+
+
+def test_the_page_offers_picture_search_and_may_show_the_picture(client):
+    page = client.get("/")
+    assert 'id="picture-input"' in page.text and 'accept="image/*"' in page.text
+    assert "blob:" in page.headers["content-security-policy"]
+    info = client.get("/api/info").json()
+    assert info["pictures"]["read_text"] is True and info["pictures"]["benchmark"] is None
