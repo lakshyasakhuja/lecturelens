@@ -47,6 +47,15 @@ index = [
 web = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    # Accounts: SQL storage, password hashing, and checking email addresses and phone numbers.
+    "sqlalchemy>=2.0",
+    "argon2-cffi>=23.1",
+    "email-validator>=2.2",
+    "phonenumberslite>=8.13",
+]
+# Keeping accounts in PostgreSQL, for a host whose own disk does not last (a Space's does not).
+postgres = [
+    "psycopg[binary]>=3.2",
 ]
 # The Hugging Face Space: the web app on Gradio's server, which is what ZeroGPU runs.
 # `spaces` does nothing off ZeroGPU, so this also runs, and is tested, anywhere else.

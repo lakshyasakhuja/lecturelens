@@ -20,6 +20,30 @@ from slideseek.index import Index
 from slideseek.moments import moment_text
 from slideseek.text import analyze
 
+# A sign-up that meets every rule, for tests that only need somebody signed in.
+ADA = {
+    "name": "Ada Lovelace",
+    "username": "ada",
+    "email": "ada@example.com",
+    "country": "AU",
+    "phone": "0412 345 678",
+    "password": "Analytical-Engine1",
+}
+
+
+def fast_accounts(url: str = "sqlite://", **options):
+    """An account store whose password hashing takes a millisecond rather than 50.
+
+    Imported here, not at the top, so the core tests run without the web extra.
+    """
+    from argon2 import PasswordHasher
+
+    from slideseek.accounts import AccountStore
+
+    hasher = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
+    return AccountStore(url, hasher=hasher, **options)
+
+
 DIM = 4096  # large enough that two different stems practically never share a bucket
 
 
