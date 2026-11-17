@@ -2,14 +2,19 @@
 
     GET /api/health                 is the server up, and are the encoders loaded?
     GET /api/info                   what the index contains: lectures, counts, models, examples
-    GET /api/search?q=...           the top moments for a query
-    POST /api/search/picture        the moments where the slide in a picture was shown
+    GET /api/search?q=...           the top moments for a query                 (signed in)
+    POST /api/search/picture        the moments where the slide in a picture was shown  (signed in)
     GET /thumbs/<lecture>/<ms>.jpg  slide thumbnails, straight from the index directory
     GET /                           the frontend (plain HTML, CSS and JavaScript, no build step)
+    /api/account...                 signing up, in and out: see ``auth.py``
 
-The server holds no state beyond the loaded index. It hosts no video: a result either links
-out to where the lecture already lives (a YouTube id parsed from the lecture's link
-template) or, when run locally with a directory of recordings, plays the local file.
+Searching needs an account. Without one, the page and what the library contains are still
+shown, but a search is answered with 401 until the visitor signs in.
+
+Beyond the loaded index, the only state is the accounts, which live in a SQL database
+(``accounts.py``). The server hosts no video: a result either links out to where the
+lecture already lives (a YouTube id parsed from the lecture's link template) or, when run
+locally with a directory of recordings, plays the local file.
 
 Search runs on a CPU. One query at a time goes through the encoders, guarded by a lock: a
 query takes about a tenth of a second, and serialising them is simpler and safer than
@@ -22,6 +27,7 @@ which is how the Hugging Face Space runs them on Gradio's server: see ``space.py
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 import threading
@@ -30,16 +36,20 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from slideseek import __version__
+from slideseek.accounts import Account, AccountStore, redacted
 from slideseek.catalog import VIDEO_EXTENSIONS, Lecture
 from slideseek.index import Index
 from slideseek.search import PICTURE_RANKERS, Result, Searcher
 from slideseek.utils import format_timestamp, read_json
+from slideseek.web.auth import UNSAFE_METHODS, add_account_routes, same_origin
+
+log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_QUERY_CHARS = 300
@@ -48,6 +58,9 @@ MAX_RESULTS = 20
 MAX_PICTURE_BYTES = 8 * 1024 * 1024
 MAX_PICTURE_PIXELS = 40_000_000
 PICTURE_SIDE = 1600
+# Where accounts are kept when nothing says otherwise: a file beside where the server runs.
+DEFAULT_DATABASE_URL = "sqlite:///accounts.db"
+SIGN_IN_FIRST = "Sign in to search."
 
 
 class BadRequest(ValueError):
@@ -194,6 +207,7 @@ def create_app(
     warm_up: bool = True,
     app: FastAPI | None = None,
     rerank: bool = False,
+    accounts: AccountStore | None = None,
 ) -> FastAPI:
     """Build the application around a loaded index.
 
@@ -201,8 +215,14 @@ def create_app(
     says that the host offers the cross-encoder as a second stage: ``/api/info`` reports it
     so the page can show the option, and ``app.state.run_search(..., rerank=True)`` runs it.
     The JSON API itself never reranks; the host decides how that step is reached.
+
+    ``accounts`` is where the accounts are kept. Without one they are kept in memory and
+    are gone when the server stops, which suits a test and nothing else.
     """
     searcher = searcher or Searcher(index, device=device)
+    if accounts is None:
+        accounts = AccountStore("sqlite://")
+        log.warning("accounts are kept in memory: they will be lost when the server stops")
     local_videos = find_local_videos(videos_dir, index.lectures)
     lock = threading.Lock()
     ready = threading.Event()
@@ -225,13 +245,30 @@ def create_app(
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
-        response = await call_next(request)
+        # The session cookie is sent from other sites too (see auth.py), so anything that
+        # changes something must come from this site's own page.
+        if (
+            request.method in UNSAFE_METHODS
+            and request.url.path.startswith("/api/")
+            and not same_origin(request)
+        ):
+            response = JSONResponse({"detail": "Requests from other sites are refused."}, 403)
+        else:
+            response = await call_next(request)
         response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         if request.url.path.startswith("/thumbs/"):
             response.headers.setdefault("Cache-Control", "public, max-age=86400")
         return response
+
+    add_account_routes(app, accounts)
+
+    def signed_in(request: Request) -> Account:
+        account = app.state.account_for(request.cookies)
+        if account is None:
+            raise HTTPException(status_code=401, detail=SIGN_IN_FIRST)
+        return account
 
     def player(lecture_id: str, start: float) -> dict[str, Any] | None:
         if lecture_id in local_videos:
@@ -401,6 +438,7 @@ def create_app(
         request: Request,
         k: int = Query(5, ge=1, le=MAX_RESULTS, description="How many moments to return."),
         lecture: list[str] | None = Query(None, description="Restrict to these lecture ids."),
+        account: Account = Depends(signed_in),
     ) -> dict[str, Any]:
         """The request body is the picture itself: PNG, JPEG, WebP or GIF."""
         if not request.headers.get("content-type", "").startswith("image/"):
@@ -421,6 +459,7 @@ def create_app(
         q: str = Query(..., description="The question, in plain English."),
         k: int = Query(5, ge=1, le=MAX_RESULTS, description="How many moments to return."),
         lecture: list[str] | None = Query(None, description="Restrict to these lecture ids."),
+        account: Account = Depends(signed_in),
     ) -> dict[str, Any]:
         try:
             return run_search(q, k, lecture)
@@ -478,6 +517,14 @@ def load_index_from_env() -> Index:
     return Index.load(index_dir)
 
 
+def accounts_from_env(default: str = DEFAULT_DATABASE_URL) -> AccountStore:
+    """The account store named by ``SLIDESEEK_DATABASE_URL``, or ``default``."""
+    url = os.environ.get("SLIDESEEK_DATABASE_URL", "").strip() or default
+    store = AccountStore(url)
+    log.info("accounts are kept in %s", redacted(store.url))
+    return store
+
+
 def create_app_from_env() -> FastAPI:
     """App factory for ``uvicorn slideseek.web.server:create_app_from_env --factory``.
 
@@ -492,6 +539,8 @@ def create_app_from_env() -> FastAPI:
     ``SLIDESEEK_PICTURE_BENCHMARK``  picture search metrics
                                 (default ``results/screenshot/metrics.json``)
     ``SLIDESEEK_DEVICE``      device for the query encoders (default ``cpu``)
+    ``SLIDESEEK_DATABASE_URL``  where accounts are kept: a SQLAlchemy URL such as
+                                ``postgresql://...`` (default ``sqlite:///accounts.db``)
     """
     from slideseek.logs import configure_logging
 
@@ -510,4 +559,5 @@ def create_app_from_env() -> FastAPI:
             os.environ.get("SLIDESEEK_PICTURE_BENCHMARK", "results/screenshot/metrics.json")
         ),
         device=os.environ.get("SLIDESEEK_DEVICE", "cpu"),
+        accounts=accounts_from_env(),
     )

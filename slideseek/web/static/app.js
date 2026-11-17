@@ -4,7 +4,10 @@
  * /api/info (what the index contains), /api/search (the moments for a question) and
  * /api/search/picture (the moments for a picture of a slide). Where the server offers it,
  * one more call reranks the results on a GPU; see "reranking" below.
- * Text from the server is only ever inserted as text nodes, never as HTML.
+ *
+ * Searching needs an account, so the two search endpoints answer 401 until the visitor
+ * signs in; see "accounts" below. Text from the server is only ever inserted as text
+ * nodes, never as HTML.
  */
 (() => {
   "use strict";
@@ -31,6 +34,10 @@
   const pictureChip = $("picture-chip");
   const picturePreview = $("picture-preview");
   const pictureClear = $("picture-clear");
+  const accountDialog = $("account");
+  const accountButton = $("account-button");
+  const gate = $("gate");
+  const toast = $("toast");
 
   const BADGES = {
     said: { label: "Said", kind: "said" },
@@ -45,6 +52,7 @@
   let info = null;
   let inFlight = null;
   let picture = null; // { file, url } while a picture is the query
+  let account = null; // the signed-in visitor, as /api/account describes them
 
   /* ------------------------------------------------------------ helpers */
 
@@ -78,9 +86,28 @@
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
       const detail = typeof body.detail === "string" ? body.detail : "The search could not be completed.";
-      throw new Error(detail);
+      throw Object.assign(new Error(detail), { status: response.status });
     }
     return body;
+  }
+
+  /* A JSON request that changes something. Resolves to { ok, status, data } either way. */
+  async function sendJSON(method, url, body) {
+    const response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = response.status === 204 ? {} : await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, data };
+  }
+
+  let toastTimer = 0;
+  function announce(message) {
+    toast.textContent = message;
+    toast.classList.add("is-shown");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("is-shown"), 3600);
   }
 
   function duration(seconds) {
@@ -370,6 +397,10 @@
   async function search(rawQuery, { push = false, scroll = false } = {}) {
     const query = rawQuery.trim().replace(/\s+/g, " ");
     if (!query) return;
+    if (!account) {
+      whenSignedIn(() => search(query, { push, scroll }), `Sign in to see the moments for “${query}”.`);
+      return;
+    }
     clearPicture();
 
     if (inFlight) inFlight.abort();
@@ -401,6 +432,7 @@
       if (error.name === "AbortError") return;
       grid.textContent = "";
       status.textContent = error.message || "Something went wrong. Try again.";
+      if (error.status === 401) sessionEnded(() => search(query, { push: false, scroll }));
     } finally {
       if (!signal.aborted) form.classList.remove("is-busy");
     }
@@ -439,6 +471,10 @@
   }
 
   async function searchPicture(file, { scroll = true } = {}) {
+    if (!account) {
+      whenSignedIn(() => searchPicture(file, { scroll }), "Sign in to search with your picture.");
+      return;
+    }
     const problem = pictureProblem(file);
     resultsSection.hidden = false;
     if (problem) {
@@ -475,13 +511,17 @@
         signal,
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "The picture could not be searched.");
+      if (!response.ok) {
+        const detail = typeof data.detail === "string" ? data.detail : "The picture could not be searched.";
+        throw Object.assign(new Error(detail), { status: response.status });
+      }
       if (info) info.ready = true;
       renderResults(data);
     } catch (error) {
       if (error.name === "AbortError") return;
       grid.textContent = "";
       status.textContent = error.message || "Something went wrong. Try again.";
+      if (error.status === 401) sessionEnded(() => searchPicture(file, { scroll }));
     } finally {
       if (!signal.aborted) form.classList.remove("is-busy");
     }
@@ -495,7 +535,10 @@
     return null;
   }
 
-  pictureButton.addEventListener("click", () => pictureInput.click());
+  // Choosing a file right after signing in may be blocked by the browser; a second click works.
+  pictureButton.addEventListener("click", () =>
+    whenSignedIn(() => pictureInput.click(), "Sign in to search with a picture of a slide.")
+  );
   pictureInput.addEventListener("change", () => {
     const file = pictureInput.files && pictureInput.files[0];
     if (file) searchPicture(file);
@@ -507,6 +550,7 @@
 
   // Paste a screenshot anywhere on the page. Text pasted into a field is left alone.
   document.addEventListener("paste", (event) => {
+    if (accountDialog.open) return;
     const file = imageFrom(event.clipboardData && event.clipboardData.items);
     if (!file) return;
     event.preventDefault();
@@ -533,6 +577,7 @@
     event.preventDefault();
     dragDepth = 0;
     form.classList.remove("is-dropping");
+    if (accountDialog.open) return;
     const file = imageFrom(event.dataTransfer.files);
     if (file) searchPicture(file);
     else {
@@ -543,6 +588,10 @@
   });
 
   $("picture-example").addEventListener("click", async () => {
+    if (!account) {
+      whenSignedIn(() => $("picture-example").click(), "Sign in to try a photo of a slide.");
+      return;
+    }
     const response = await fetch("/samples/slide-photo.jpg");
     if (!response.ok) return;
     const blob = await response.blob();
@@ -572,6 +621,428 @@
         "never the frame that was indexed. “Found first” means the top result shows that slide.";
     }
   }
+
+  /* ------------------------------------------------------------ accounts
+   *
+   * The session is an HttpOnly cookie, which this script cannot read and never sees. It asks
+   * /api/account who is signed in, and the server decides. The rules checked here as the
+   * visitor types are the server's rules, repeated so the form can say what is missing
+   * before it is sent; the server checks them again either way.
+   */
+  const views = {
+    signin: { title: "Sign in to Slideseek", lead: "Sign in to search the lectures." },
+    signup: { title: "Create your account", lead: "It’s free, and it is all you need to search every lecture." },
+    profile: { title: "Your account", lead: "" },
+  };
+  const RULE_TESTS = {
+    length: (text) => [...text].length >= 8,
+    upper: (text) => /\p{Lu}/u.test(text),
+    lower: (text) => /\p{Ll}/u.test(text),
+    number: (text) => /\p{Nd}/u.test(text),
+    special: (text) => /[\p{P}\p{S}]/u.test(text),
+  };
+  const USERNAME = /^[A-Za-z0-9][A-Za-z0-9._-]{2,29}$/;
+  let pending = null; // what to do once the visitor is signed in
+  let countries = null;
+
+  function initials(name) {
+    const words = name.trim().split(/\s+/).filter(Boolean);
+    const first = (word) => (word ? [...word][0] : "");
+    return (first(words[0]) + (words.length > 1 ? first(words[words.length - 1]) : "")).toUpperCase();
+  }
+
+  function setAccount(next) {
+    account = next || null;
+    accountButton.hidden = false;
+    const avatar = $("account-avatar");
+    const label = $("account-label");
+    if (account) {
+      avatar.textContent = initials(account.name);
+      avatar.hidden = false;
+      label.textContent = `Your account, ${account.name}`;
+      label.classList.add("visually-hidden");
+    } else {
+      avatar.hidden = true;
+      label.textContent = "Sign in";
+      label.classList.remove("visually-hidden");
+    }
+    accountButton.classList.toggle("is-signed-in", Boolean(account));
+    gate.hidden = Boolean(account);
+    form.classList.toggle("is-locked", !account);
+  }
+
+  /* Run `action` now if somebody is signed in; otherwise ask them to sign in first. */
+  function whenSignedIn(action, reason) {
+    if (account) {
+      action();
+      return;
+    }
+    pending = action;
+    openAccount("signin", reason);
+  }
+
+  function sessionEnded(retry) {
+    setAccount(null);
+    whenSignedIn(retry, "Your session has ended. Sign in again to carry on.");
+  }
+
+  function openAccount(view, reason) {
+    showView(view, reason);
+    if (!accountDialog.open) accountDialog.showModal();
+    focusFirst(view);
+  }
+
+  function showView(view, reason) {
+    for (const node of accountDialog.querySelectorAll("[data-view]")) node.hidden = node.dataset.view !== view;
+    $("account-title").textContent = views[view].title;
+    const lead = $("account-lead");
+    lead.textContent = view === "profile" ? `Signed in as @${account.username}` : reason || views[view].lead;
+    // An <svg> has no `hidden` property of its own; the attribute still works.
+    $("account-mark").toggleAttribute("hidden", view === "profile");
+    $("profile-avatar").hidden = view !== "profile";
+    if (view === "signup") loadCountries();
+    if (view === "profile") renderProfile();
+    for (const formNode of accountDialog.querySelectorAll("form.auth__form")) clearErrors(formNode);
+  }
+
+  function focusFirst(view) {
+    const container = accountDialog.querySelector(`[data-view="${view}"]`);
+    const target = container && container.querySelector("input, select, button");
+    if (target) requestAnimationFrame(() => target.focus());
+  }
+
+  function renderProfile() {
+    $("profile-avatar").textContent = initials(account.name);
+    $("profile-name").textContent = account.name;
+    $("profile-username").textContent = `@${account.username}`;
+    $("profile-email").textContent = account.email;
+    $("profile-phone").textContent = account.phone;
+    $("delete-form").hidden = true;
+    $("delete-start").setAttribute("aria-expanded", "false");
+    $("delete-password").value = "";
+  }
+
+  function showAlert(node, message) {
+    node.textContent = message;
+    node.hidden = false;
+  }
+
+  function clearErrors(formNode) {
+    for (const node of formNode.querySelectorAll(".field__error, .auth__alert")) {
+      node.textContent = "";
+      node.hidden = true;
+    }
+    for (const node of formNode.querySelectorAll("[aria-invalid]")) node.removeAttribute("aria-invalid");
+  }
+
+  /* Show each field's message under it; returns whether there were any. */
+  function showErrors(prefix, errors) {
+    let first = null;
+    for (const [field, message] of Object.entries(errors)) {
+      const note = $(`${prefix}-${field}-error`);
+      if (note) {
+        note.textContent = message;
+        note.hidden = false;
+      }
+      const inputs = field === "phone" ? [$(`${prefix}-country`), $(`${prefix}-phone`)] : [$(`${prefix}-${field}`)];
+      for (const node of inputs.filter(Boolean)) node.setAttribute("aria-invalid", "true");
+      if (!first) first = inputs.find(Boolean);
+    }
+    if (first) first.focus();
+    return Object.keys(errors).length > 0;
+  }
+
+  /* Editing a field takes its message away; the next attempt to send checks it again. */
+  function clearFieldError(node) {
+    if (!node.id || !node.hasAttribute("aria-invalid")) return;
+    const field = node.id.replace(/-country$/, "-phone");
+    for (const id of [field, field.replace(/-phone$/, "-country")]) {
+      const related = document.getElementById(id);
+      if (related) related.removeAttribute("aria-invalid");
+    }
+    const note = document.getElementById(`${field}-error`);
+    if (note) {
+      note.textContent = "";
+      note.hidden = true;
+    }
+  }
+
+  accountDialog.addEventListener("input", (event) => clearFieldError(event.target));
+  accountDialog.addEventListener("change", (event) => clearFieldError(event.target));
+
+  function setBusy(formNode, busy) {
+    formNode.setAttribute("aria-busy", busy ? "true" : "false");
+    for (const button of formNode.querySelectorAll("button[type=submit]")) button.disabled = busy;
+  }
+
+  const unreachable = "Slideseek could not be reached. Check your connection and try again.";
+
+  /* Hugging Face shows the app inside a frame on its own site, and some browsers (Safari)
+   * keep cookies away from such frames. Signing in there would seem to work and then
+   * fail, so inside a frame the page checks that the session stuck. */
+  const framed = window.self !== window.top;
+
+  async function sessionHeld() {
+    if (!framed) return true;
+    try {
+      return Boolean((await getJSON("/api/account")).account);
+    } catch (error) {
+      return true;
+    }
+  }
+
+  function cookieBlocked(node, created) {
+    node.textContent = created
+      ? "Your account is ready, but this browser does not allow signing in inside an embedded page. "
+      : "This browser does not allow signing in inside an embedded page. ";
+    const link = element("a", "link", "Open Slideseek in a new tab");
+    link.href = location.href;
+    link.target = "_blank";
+    link.rel = "noopener";
+    node.append(link);
+    node.hidden = false;
+  }
+
+  function signedIn(next, greeting) {
+    setAccount(next);
+    $("signin-form").reset();
+    $("signup-form").reset();
+    updateRules("");
+    const action = pending;
+    pending = null;
+    accountDialog.close();
+    announce(greeting);
+    if (action) action();
+    else input.focus();
+  }
+
+  /* -- sign in */
+
+  $("signin-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formNode = event.currentTarget;
+    clearErrors(formNode);
+    const login = $("signin-login").value.trim();
+    const password = $("signin-password").value;
+    const errors = {};
+    if (!login) errors.login = "Enter your username or email address.";
+    if (!password) errors.password = "Enter your password.";
+    if (showErrors("signin", errors)) return;
+    setBusy(formNode, true);
+    try {
+      const reply = await sendJSON("POST", "/api/account/signin", { login, password });
+      if (!reply.ok) {
+        showAlert($("signin-alert"), reply.data.detail || "Signing in did not work. Try again.");
+        $("signin-password").select();
+        return;
+      }
+      if (!(await sessionHeld())) {
+        cookieBlocked($("signin-alert"), false);
+        return;
+      }
+      signedIn(reply.data.account, `Welcome back, ${reply.data.account.name.split(" ")[0]}.`);
+    } catch (error) {
+      showAlert($("signin-alert"), unreachable);
+    } finally {
+      setBusy(formNode, false);
+    }
+  });
+
+  /* -- sign up */
+
+  function updateRules(password) {
+    for (const item of $("password-rules").children) {
+      const met = RULE_TESTS[item.dataset.rule](password);
+      item.classList.toggle("is-met", met);
+      item.querySelector("[data-rule-state]").textContent = met ? ", done" : ", not yet";
+    }
+  }
+
+  $("signup-password").addEventListener("input", (event) => updateRules(event.target.value));
+
+  function loadCountries() {
+    if (countries) return countries;
+    const select = $("signup-country");
+    countries = getJSON("/api/account/countries")
+      .then(({ countries: list }) => {
+        let names = null;
+        try {
+          names = new Intl.DisplayNames([navigator.language || "en"], { type: "region" });
+        } catch (error) {
+          names = null;
+        }
+        const nameOf = (region) => {
+          try {
+            return (names && names.of(region)) || region;
+          } catch (error) {
+            return region;
+          }
+        };
+        const items = list
+          .map(({ region, code }) => ({ region, code, name: nameOf(region) }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        select.textContent = "";
+        for (const item of items) {
+          // The code first: a narrow picker cuts the end of the text off, not the start.
+          const option = element("option", "", `+${item.code} ${item.name}`);
+          option.value = item.region;
+          select.append(option);
+        }
+        select.value = guessRegion(items);
+      })
+      .catch(() => {
+        countries = null;
+      });
+    return countries;
+  }
+
+  /* The visitor's own country, as far as their browser's language says (en-AU is AU). */
+  function guessRegion(items) {
+    const known = new Set(items.map((item) => item.region));
+    for (const tag of navigator.languages || [navigator.language || ""]) {
+      const region = (tag.split("-").find((part, i) => i > 0 && /^[A-Za-z]{2}$/.test(part)) || "").toUpperCase();
+      if (known.has(region)) return region;
+    }
+    return known.has("US") ? "US" : items[0].region;
+  }
+
+  $("signup-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formNode = event.currentTarget;
+    clearErrors(formNode);
+    const values = {
+      name: $("signup-name").value.trim(),
+      username: $("signup-username").value.trim(),
+      email: $("signup-email").value.trim(),
+      country: $("signup-country").value,
+      phone: $("signup-phone").value.trim(),
+      password: $("signup-password").value,
+    };
+    const errors = {};
+    if (!values.name) errors.name = "Enter your name.";
+    if (!values.username) errors.username = "Choose a username.";
+    else if (!USERNAME.test(values.username)) errors.username = "Use 3 to 30 letters, numbers, dots, dashes or underscores, starting with a letter or a number.";
+    if (!values.email) errors.email = "Enter your email address.";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) errors.email = "Enter an email address such as name@example.com.";
+    if (!values.phone) errors.phone = "Enter your phone number.";
+    else if (!values.country && !values.phone.startsWith("+")) errors.phone = "Choose the country code of your phone number.";
+    if (!values.password) errors.password = "Choose a password.";
+    else if (Object.values(RULE_TESTS).some((test) => !test(values.password))) errors.password = "Your password needs everything in the list below.";
+    if (showErrors("signup", errors)) return;
+    setBusy(formNode, true);
+    try {
+      const reply = await sendJSON("POST", "/api/account/signup", values);
+      if (!reply.ok) {
+        const fieldErrors = reply.data.errors || {};
+        if (!Object.keys(fieldErrors).length) showAlert($("signup-alert"), reply.data.detail || "Your account could not be created. Try again.");
+        showErrors("signup", fieldErrors);
+        return;
+      }
+      if (!(await sessionHeld())) {
+        cookieBlocked($("signup-alert"), true);
+        return;
+      }
+      signedIn(reply.data.account, `Welcome to Slideseek, ${reply.data.account.name.split(" ")[0]}.`);
+    } catch (error) {
+      showAlert($("signup-alert"), unreachable);
+    } finally {
+      setBusy(formNode, false);
+    }
+  });
+
+  /* -- the signed-in view: sign out, or delete the account */
+
+  $("signout-button").addEventListener("click", async () => {
+    try {
+      await sendJSON("POST", "/api/account/signout");
+    } catch (error) {
+      showAlert($("profile-alert"), unreachable);
+      return;
+    }
+    setAccount(null);
+    accountDialog.close();
+    resultsSection.hidden = true;
+    announce("You have signed out.");
+  });
+
+  $("delete-start").addEventListener("click", (event) => {
+    const formNode = $("delete-form");
+    formNode.hidden = !formNode.hidden;
+    event.currentTarget.setAttribute("aria-expanded", String(!formNode.hidden));
+    if (!formNode.hidden) $("delete-password").focus();
+  });
+
+  $("delete-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formNode = event.currentTarget;
+    clearErrors(formNode);
+    const password = $("delete-password").value;
+    if (showErrors("delete", password ? {} : { password: "Enter your password to confirm." })) return;
+    setBusy(formNode, true);
+    try {
+      const reply = await sendJSON("DELETE", "/api/account", { password });
+      if (!reply.ok) {
+        const fieldErrors = reply.data.errors || {};
+        if (!Object.keys(fieldErrors).length) showAlert($("delete-alert"), reply.data.detail || "Your account could not be deleted. Try again.");
+        showErrors("delete", fieldErrors);
+        return;
+      }
+      setAccount(null);
+      accountDialog.close();
+      resultsSection.hidden = true;
+      announce("Your account has been deleted.");
+    } catch (error) {
+      showAlert($("delete-alert"), unreachable);
+    } finally {
+      setBusy(formNode, false);
+    }
+  });
+
+  /* -- the sheet itself */
+
+  for (const button of accountDialog.querySelectorAll("[data-show-view]")) {
+    button.addEventListener("click", () => {
+      showView(button.dataset.showView);
+      focusFirst(button.dataset.showView);
+    });
+  }
+
+  for (const button of accountDialog.querySelectorAll("[data-reveal]")) {
+    button.addEventListener("click", () => {
+      const field = $(button.dataset.reveal);
+      const show = field.type === "password";
+      field.type = show ? "text" : "password";
+      button.textContent = show ? "Hide" : "Show";
+      button.setAttribute("aria-pressed", String(show));
+      field.focus();
+    });
+  }
+
+  accountButton.addEventListener("click", () => openAccount(account ? "profile" : "signin"));
+  $("gate-signin").addEventListener("click", () => openAccount("signin"));
+  $("gate-signup").addEventListener("click", () => openAccount("signup"));
+
+  // Closed without signing in: whatever was waiting is dropped. Passwords never linger.
+  accountDialog.addEventListener("close", () => {
+    pending = null;
+    for (const button of accountDialog.querySelectorAll("[data-reveal]")) {
+      const field = $(button.dataset.reveal);
+      field.value = "";
+      field.type = "password";
+      button.textContent = "Show";
+      button.setAttribute("aria-pressed", "false");
+    }
+    updateRules("");
+  });
+
+  // A click on the dimmed page behind the sheet closes it; a drag out of a field does not.
+  let pressedOnBackdrop = false;
+  accountDialog.addEventListener("pointerdown", (event) => {
+    pressedOnBackdrop = event.target === accountDialog;
+  });
+  accountDialog.addEventListener("click", (event) => {
+    if (event.target === accountDialog && pressedOnBackdrop) accountDialog.close();
+  });
 
   /* ------------------------------------------------------------ player */
 
@@ -633,7 +1104,8 @@
 
   document.addEventListener("keydown", (event) => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
-    if (event.key === "/" && !typing && !event.metaKey && !event.ctrlKey && !player.open) {
+    const sheetOpen = player.open || accountDialog.open;
+    if (event.key === "/" && !typing && !event.metaKey && !event.ctrlKey && !sheetOpen) {
       event.preventDefault();
       input.focus();
       input.select();
@@ -645,6 +1117,12 @@
     const query = params.get("q");
     const lecture = params.get("lecture") || "";
     lectureSelect.value = [...lectureSelect.options].some((o) => o.value === lecture) ? lecture : "";
+    if (!account) {
+      // Nothing is searched until the visitor signs in; a shared link keeps its question.
+      if (query) input.value = query;
+      resultsSection.hidden = true;
+      return;
+    }
     if (query) {
       input.value = query;
       search(query);
@@ -709,13 +1187,14 @@
   setTimeout(revealInView, 1200);
 
   async function start() {
-    try {
-      info = await getJSON("/api/info");
-    } catch (error) {
+    const [library, visitor] = await Promise.allSettled([getJSON("/api/info"), getJSON("/api/account")]);
+    setAccount(visitor.status === "fulfilled" ? visitor.value.account : null);
+    if (library.status === "rejected") {
       status.textContent = "The library could not be loaded.";
       resultsSection.hidden = false;
       return;
     }
+    info = library.value;
     rerankOption.hidden = !info.rerank;
     renderPictureBenchmark();
     renderStats();

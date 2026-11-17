@@ -9,7 +9,15 @@ import pytest
 
 pytest.importorskip("fastapi", reason="the web extra is not installed")
 
-from fakes import FakeImageEmbedder, FakePictureOcr, FakeTextEmbedder, make_index, make_picture
+from fakes import (
+    ADA,
+    FakeImageEmbedder,
+    FakePictureOcr,
+    FakeTextEmbedder,
+    fast_accounts,
+    make_index,
+    make_picture,
+)
 from fastapi.testclient import TestClient
 
 from slideseek.catalog import Lecture
@@ -25,7 +33,14 @@ from slideseek.web.server import (
 EXAMPLES = [{"query": "chain rule", "type": "keyword"}]
 
 
-def make_client(tmp_path, *, with_thumbs=False, videos=False, benchmark=None):
+def sign_up(client, **changes):
+    """Sign ``client`` up, and so in: its cookie jar keeps the session from then on."""
+    reply = client.post("/api/account/signup", json={**ADA, **changes})
+    assert reply.status_code == 201, reply.text
+    return client
+
+
+def make_client(tmp_path, *, with_thumbs=False, videos=False, benchmark=None, signed_in=True):
     index = make_index()
     for lecture_id, lecture in list(index.lectures.items()):
         index.lectures[lecture_id] = dataclasses.replace(
@@ -68,8 +83,10 @@ def make_client(tmp_path, *, with_thumbs=False, videos=False, benchmark=None):
         examples=EXAMPLES,
         benchmark=benchmark,
         warm_up=False,
+        accounts=fast_accounts(),
     )
-    return TestClient(app)
+    client = TestClient(app)
+    return sign_up(client) if signed_in else client
 
 
 @pytest.fixture()
@@ -362,13 +379,15 @@ def make_app(reranker=None, **options):
         image_embedder=FakeImageEmbedder(),
         reranker=reranker,
     )
+    options.setdefault("accounts", fast_accounts())
     return create_app(index, searcher, warm_up=False, **options)
 
 
 def test_the_json_api_does_not_offer_reranking_unless_the_host_does():
     assert TestClient(make_app()).get("/api/info").json()["rerank"] is False
     assert TestClient(make_app(rerank=True)).get("/api/info").json()["rerank"] is True
-    body = TestClient(make_app()).get("/api/search", params={"q": "gradient descent"}).json()
+    client = sign_up(TestClient(make_app()))
+    body = client.get("/api/search", params={"q": "gradient descent"}).json()
     assert body["reranked"] is False and "rerank_ms" not in body
 
 
@@ -413,7 +432,7 @@ def test_routes_attach_to_an_existing_application_and_leave_room_for_its_own():
     def later():
         return {"reached": True}
 
-    client = TestClient(host)
+    client = sign_up(TestClient(host))
     assert "Slideseek" in client.get("/").text
     assert client.get("/api/search", params={"q": "chain rule"}).status_code == 200
     assert client.get("/later").json() == {"reached": True}

@@ -13,7 +13,7 @@ pytest.importorskip("fastapi", reason="the web extra is not installed")
 pytest.importorskip("gradio", reason="the space extra is not installed")
 pytest.importorskip("spaces", reason="the space extra is not installed")
 
-from fakes import FakeImageEmbedder, FakeTextEmbedder, make_index
+from fakes import ADA, FakeImageEmbedder, FakeTextEmbedder, fast_accounts, make_index
 from fastapi.testclient import TestClient
 
 from slideseek.search import Searcher
@@ -46,8 +46,18 @@ def make_space(reranker=None):
     index = make_index()
     searcher = Searcher(index, text_embedder=FakeTextEmbedder(), image_embedder=FakeImageEmbedder())
     return create_space(
-        index, searcher, reranker=reranker or GpuReranker(StubCrossEncoder()), warm_up=False
+        index,
+        searcher,
+        reranker=reranker or GpuReranker(StubCrossEncoder()),
+        warm_up=False,
+        accounts=fast_accounts(),
     )
+
+
+def signed_in(server) -> TestClient:
+    client = TestClient(server)
+    assert client.post("/api/account/signup", json=ADA).status_code == 201
+    return client
 
 
 def free_port() -> int:
@@ -84,11 +94,11 @@ def test_a_space_without_reranking_loads_no_reranker_and_has_no_endpoint():
 
     index = make_index()
     searcher = Searcher(index, text_embedder=FakeTextEmbedder(), image_embedder=FakeImageEmbedder())
-    server = create_space(index, searcher, rerank=False, warm_up=False)
+    server = create_space(index, searcher, rerank=False, warm_up=False, accounts=fast_accounts())
     assert searcher.reranker is None, "nothing was loaded"
     _, url, _ = launch(server, prevent_thread_lock=True, server_port=free_port(), quiet=True)
     try:
-        client = TestClient(server)
+        client = signed_in(server)
         assert "Slideseek" in client.get("/").text
         assert client.get("/api/info").json()["rerank"] is False
         assert client.get("/api/search", params={"q": "chain rule"}).json()["count"] >= 1
@@ -99,7 +109,9 @@ def test_a_space_without_reranking_loads_no_reranker_and_has_no_endpoint():
 
 
 def test_the_space_serves_the_same_page_and_api():
-    client = TestClient(make_space())
+    server = make_space()
+    assert TestClient(server).get("/api/search", params={"q": "chain rule"}).status_code == 401
+    client = signed_in(server)
     assert "Slideseek" in client.get("/").text
     info = client.get("/api/info").json()
     assert info["rerank"] is True and info["n_moments"] > 0
@@ -114,10 +126,17 @@ def test_reranking_is_a_gradio_call():
     server = make_space()
     _, url, _ = launch(server, prevent_thread_lock=True, server_port=free_port(), quiet=True)
     try:
-        plain = TestClient(server).get(
-            "/api/search", params={"q": "gradient descent learning rate", "k": 20}
-        )
-        client = Client(url, verbose=False)
+        browser = signed_in(server)
+        plain = browser.get("/api/search", params={"q": "gradient descent learning rate", "k": 20})
+
+        # Reranking needs an account too: a call without the session cookie is refused.
+        with pytest.raises(Exception, match="Sign in to search"):
+            Client(url, verbose=False).predict(
+                query="gradient descent", k=5, lectures=None, api_name="/rerank"
+            )
+
+        cookie = f"slideseek_session={browser.cookies['slideseek_session']}"
+        client = Client(url, verbose=False, headers={"Cookie": cookie})
         reranked = client.predict(
             query="gradient descent learning rate", k=20, lectures=None, api_name="/rerank"
         )

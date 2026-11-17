@@ -33,3 +33,9 @@ hf_cache/
 .DS_Store
 .idea/
 .vscode/
+
+# Local account databases: names, email addresses and password hashes stay off GitHub.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

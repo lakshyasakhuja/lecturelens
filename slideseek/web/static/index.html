@@ -32,7 +32,13 @@
         <a href="#benchmark">Benchmark</a>
         <a href="https://github.com/lakshyasakhuja/slideseek" rel="noopener">GitHub</a>
       </nav>
-      <a class="button button--compact" href="#search">Search</a>
+      <div class="nav__actions">
+        <a class="button button--compact" href="#search">Search</a>
+        <button class="nav__account" id="account-button" type="button" aria-haspopup="dialog" hidden>
+          <span class="avatar" id="account-avatar" aria-hidden="true" hidden></span>
+          <span id="account-label">Sign in</span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -93,6 +99,12 @@
             </div>
             <span class="search__hint" id="hint">Press <kbd>/</kbd> to search, or drop a picture here</span>
           </div>
+          <p class="search__gate" id="gate" hidden>
+            Searching needs a free account.
+            <button class="link" id="gate-signin" type="button">Sign in</button>
+            or
+            <button class="link" id="gate-signup" type="button">create one</button>
+          </p>
         </form>
 
         <div class="chips reveal" id="examples" aria-label="Example questions" hidden></div>
@@ -364,6 +376,150 @@
       </a>
     </div>
   </dialog>
+
+  <!-- Account: sign in, sign up, and the signed-in view -->
+  <dialog class="sheet sheet--account" id="account" aria-labelledby="account-title">
+    <form method="dialog" class="sheet__bar">
+      <button class="sheet__close" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </form>
+    <div class="auth">
+      <svg class="auth__mark" id="account-mark" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="10.5" cy="10.5" r="6.75" fill="none" stroke="currentColor" stroke-width="1.9"/>
+        <path d="M15.6 15.6 20.5 20.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+        <path d="M9.1 7.9v5.2l4.3-2.6z" fill="currentColor"/>
+      </svg>
+      <span class="avatar avatar--large" id="profile-avatar" aria-hidden="true" hidden></span>
+      <h2 class="auth__title" id="account-title">Sign in to Slideseek</h2>
+      <p class="auth__lead" id="account-lead">Sign in to search the lectures.</p>
+
+      <!-- Sign in -->
+      <form class="auth__form" id="signin-form" data-view="signin" novalidate>
+        <p class="auth__alert" id="signin-alert" role="alert" hidden></p>
+        <div class="field">
+          <input class="field__input" id="signin-login" name="username" type="text" placeholder=" "
+                 autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254"
+                 aria-describedby="signin-login-error">
+          <label class="field__label" for="signin-login">Username or email address</label>
+          <p class="field__error" id="signin-login-error" hidden></p>
+        </div>
+        <div class="field field--password">
+          <input class="field__input" id="signin-password" name="password" type="password" placeholder=" "
+                 autocomplete="current-password" maxlength="128" aria-describedby="signin-password-error">
+          <label class="field__label" for="signin-password">Password</label>
+          <button class="field__reveal" type="button" data-reveal="signin-password" aria-pressed="false">Show</button>
+          <p class="field__error" id="signin-password-error" hidden></p>
+        </div>
+        <button class="button button--block" type="submit">Sign in</button>
+        <p class="auth__switch">
+          New to Slideseek?
+          <button class="link" type="button" data-show-view="signup">Create an account</button>
+        </p>
+      </form>
+
+      <!-- Sign up -->
+      <form class="auth__form" id="signup-form" data-view="signup" novalidate hidden>
+        <p class="auth__alert" id="signup-alert" role="alert" hidden></p>
+        <div class="field">
+          <input class="field__input" id="signup-name" name="name" type="text" placeholder=" "
+                 autocomplete="name" maxlength="80" aria-describedby="signup-name-error">
+          <label class="field__label" for="signup-name">Name</label>
+          <p class="field__error" id="signup-name-error" hidden></p>
+        </div>
+        <div class="field">
+          <input class="field__input" id="signup-username" name="username" type="text" placeholder=" "
+                 autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="30"
+                 aria-describedby="signup-username-hint signup-username-error">
+          <label class="field__label" for="signup-username">Username</label>
+          <p class="field__hint" id="signup-username-hint">3 to 30 letters, numbers, dots, dashes or underscores.</p>
+          <p class="field__error" id="signup-username-error" hidden></p>
+        </div>
+        <div class="field">
+          <input class="field__input" id="signup-email" name="email" type="email" placeholder=" "
+                 autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254"
+                 aria-describedby="signup-email-error">
+          <label class="field__label" for="signup-email">Email address</label>
+          <p class="field__error" id="signup-email-error" hidden></p>
+        </div>
+        <div class="field-group">
+          <div class="field-row">
+            <div class="field field--select">
+              <select class="field__input" id="signup-country" name="country" autocomplete="country"
+                      aria-describedby="signup-phone-error">
+                <option value="">Choose</option>
+              </select>
+              <label class="field__label" for="signup-country">Country code</label>
+              <svg class="field__chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 4.5 3.5 3.5 3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="field">
+              <input class="field__input" id="signup-phone" name="phone" type="tel" placeholder=" "
+                     autocomplete="tel-national" inputmode="tel" maxlength="30"
+                     aria-describedby="signup-phone-error">
+              <label class="field__label" for="signup-phone">Phone number</label>
+            </div>
+          </div>
+          <p class="field__error" id="signup-phone-error" hidden></p>
+        </div>
+        <div class="field field--password">
+          <input class="field__input" id="signup-password" name="new-password" type="password" placeholder=" "
+                 autocomplete="new-password" maxlength="128"
+                 passwordrules="minlength: 8; required: lower; required: upper; required: digit; required: special;"
+                 aria-describedby="password-rules signup-password-error">
+          <label class="field__label" for="signup-password">Password</label>
+          <button class="field__reveal" type="button" data-reveal="signup-password" aria-pressed="false">Show</button>
+          <p class="field__error" id="signup-password-error" hidden></p>
+        </div>
+        <ul class="rules" id="password-rules" aria-label="Your password needs">
+          <li data-rule="length">At least 8 characters<span class="visually-hidden" data-rule-state>, not yet</span></li>
+          <li data-rule="upper">An uppercase letter<span class="visually-hidden" data-rule-state>, not yet</span></li>
+          <li data-rule="lower">A lowercase letter<span class="visually-hidden" data-rule-state>, not yet</span></li>
+          <li data-rule="number">A number<span class="visually-hidden" data-rule-state>, not yet</span></li>
+          <li data-rule="special">A special character, such as ! ? # or @<span class="visually-hidden" data-rule-state>, not yet</span></li>
+        </ul>
+        <p class="auth__fine">
+          Your name, email address and phone number are used only for your account. They are never
+          shown to anyone else or shared. Your password is stored only as a salted Argon2id hash, never
+          as itself. You can delete your account at any time.
+        </p>
+        <button class="button button--block" type="submit">Create account</button>
+        <p class="auth__switch">
+          Already have an account?
+          <button class="link" type="button" data-show-view="signin">Sign in</button>
+        </p>
+      </form>
+
+      <!-- Signed in -->
+      <div class="auth__profile" data-view="profile" hidden>
+        <dl class="profile">
+          <div><dt>Name</dt><dd id="profile-name"></dd></div>
+          <div><dt>Username</dt><dd id="profile-username"></dd></div>
+          <div><dt>Email</dt><dd id="profile-email"></dd></div>
+          <div><dt>Phone</dt><dd id="profile-phone"></dd></div>
+        </dl>
+        <p class="auth__alert" id="profile-alert" role="alert" hidden></p>
+        <button class="button button--block button--secondary" id="signout-button" type="button">Sign out</button>
+        <button class="link link--danger auth__delete" id="delete-start" type="button" aria-expanded="false" aria-controls="delete-form">Delete account</button>
+        <form class="auth__form auth__danger" id="delete-form" novalidate hidden>
+          <p class="auth__fine">
+            This deletes your account, with your name, email address and phone number, and signs you
+            out everywhere. It cannot be undone.
+          </p>
+          <p class="auth__alert" id="delete-alert" role="alert" hidden></p>
+          <div class="field field--password">
+            <input class="field__input" id="delete-password" name="password" type="password" placeholder=" "
+                   autocomplete="current-password" maxlength="128" aria-describedby="delete-password-error">
+            <label class="field__label" for="delete-password">Your password</label>
+            <button class="field__reveal" type="button" data-reveal="delete-password" aria-pressed="false">Show</button>
+            <p class="field__error" id="delete-password-error" hidden></p>
+          </div>
+          <button class="button button--block button--danger" type="submit">Delete my account</button>
+        </form>
+      </div>
+    </div>
+  </dialog>
+
+  <p class="toast" id="toast" role="status" aria-live="polite"></p>
 
   <!-- A result card -->
   <template id="result-template">

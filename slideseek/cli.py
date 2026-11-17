@@ -410,16 +410,24 @@ def serve(
     ),
     port: int = typer.Option(7860, help="Port to listen on."),
     device: str = typer.Option("cpu", help="Device for the query encoders."),
+    database: str = typer.Option(
+        "sqlite:///accounts.db",
+        envvar="SLIDESEEK_DATABASE_URL",
+        help="Where accounts are kept, as a SQLAlchemy URL. Put a PostgreSQL URL with a "
+        "password in the environment variable, not on the command line.",
+    ),
 ) -> None:
     """Open the search page for an index in your browser.
 
-    Without --videos, results link to wherever the catalogue says each lecture lives. With
-    it, they play your local recordings, and nothing leaves your machine.
+    Searching needs an account: sign up on the page the first time. Without --videos,
+    results link to wherever the catalogue says each lecture lives. With it, they play your
+    local recordings, and nothing leaves your machine.
     """
     setup_logging()
     try:
         import uvicorn
 
+        from slideseek.accounts import AccountStore, redacted
         from slideseek.web.server import (
             create_app,
             load_benchmark,
@@ -439,7 +447,9 @@ def serve(
         benchmark=load_benchmark("results/test/metrics.json"),
         picture_benchmark=load_picture_benchmark("results/screenshot/metrics.json"),
         device=device,
+        accounts=(accounts := AccountStore(database)),
     )
+    console.print(f"Accounts are kept in {redacted(accounts.url)}")
     console.print(f"Slideseek is at [bold]http://{host}:{port}[/bold]  (Ctrl+C to stop)")
     uvicorn.run(web_app, host=host, port=port, log_level="warning", access_log=False)
 

@@ -7,14 +7,19 @@ more endpoint is added through Gradio:
 
     /gradio_api/call/rerank    the search, then the cross-encoder over the fused top 20
 
-Everything a visitor needs to search runs on the Space's CPU, exactly as it does anywhere
-else, and costs them nothing. Only the forward passes of the reranker run inside
+Searching needs an account here as everywhere; the endpoint checks the visitor's session
+cookie like the JSON routes do. Everything a visitor needs to search runs on the Space's
+CPU, exactly as it does anywhere else, and costs them nothing. Only the forward passes of the reranker run inside
 ``@spaces.GPU``, where ZeroGPU attaches a GPU for the length of the call and charges the
 time to the visitor's daily allowance. The page calls that endpoint through Gradio's
 JavaScript client, which is what carries the visitor's identity to ZeroGPU.
 
 Outside ZeroGPU, ``@spaces.GPU`` does nothing and the reranker runs on whatever device it
 is given, so the Space can be run and tested on a laptop.
+
+A Space's own disk is wiped whenever it restarts, so accounts kept on it last only until
+then. ``SLIDESEEK_DATABASE_URL`` names a database that outlives it (PostgreSQL); failing
+that, a Space with persistent storage keeps them under ``/data``.
 
 Reranking is off unless ``SLIDESEEK_RERANK=1``, because on ZeroGPU it does not work yet.
 Measured on the deployed Space in November 2026 (torch 2.13.0, spaces 0.51.3): a GPU call
@@ -30,8 +35,10 @@ imports it first; the import here is second in line.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import gradio
@@ -39,17 +46,23 @@ import numpy as np
 import spaces
 
 from slideseek import __version__
+from slideseek.accounts import AccountStore
 from slideseek.index import Index
 from slideseek.rerank import Reranker
 from slideseek.search import Searcher
 from slideseek.web.server import (
+    DEFAULT_DATABASE_URL,
+    SIGN_IN_FIRST,
     BadRequest,
+    accounts_from_env,
     create_app,
     load_benchmark,
     load_examples,
     load_index_from_env,
     load_picture_benchmark,
 )
+
+log = logging.getLogger(__name__)
 
 # The longest one reranking call may hold a GPU, in seconds. Twenty short documents take
 # about a second; the rest is headroom for the first call, which also moves the model
@@ -66,6 +79,29 @@ def on_zero_gpu() -> bool:
 def rerank_enabled() -> bool:
     """Does the environment ask for reranking? ``SLIDESEEK_RERANK=1`` turns it on."""
     return os.environ.get("SLIDESEEK_RERANK", "").lower() in {"1", "t", "true", "yes", "on"}
+
+
+def default_database_url() -> str:
+    """Where accounts go without ``SLIDESEEK_DATABASE_URL``: persistent storage if the Space
+    has it (mounted at ``/data``), or else a file that the next restart will wipe."""
+    data = Path("/data")
+    if data.is_dir() and os.access(data, os.W_OK):
+        return f"sqlite:///{data / 'slideseek-accounts.db'}"
+    if not os.environ.get("SLIDESEEK_DATABASE_URL"):
+        log.warning(
+            "no SLIDESEEK_DATABASE_URL and no persistent storage: accounts will be lost "
+            "when the Space restarts"
+        )
+    return DEFAULT_DATABASE_URL
+
+
+def request_cookies(request: Any) -> dict[str, str]:
+    """The cookies of the HTTP request behind a Gradio call, however Gradio holds them."""
+    raw = getattr(request, "request", None)
+    if raw is not None:
+        return dict(raw.cookies)
+    kwargs = getattr(request, "kwargs", None) or {}
+    return dict(kwargs.get("cookies") or {})
 
 
 @spaces.GPU(duration=1)
@@ -102,6 +138,7 @@ def create_space(
     picture_benchmark: Mapping[str, Any] | None = None,
     device: str = "cpu",
     warm_up: bool = True,
+    accounts: AccountStore | None = None,
 ) -> gradio.Server:
     """The web app as a Gradio server. Call ``.launch()`` on the result to serve it.
 
@@ -142,15 +179,23 @@ def create_space(
         warm_up=False,
         app=server,
         rerank=rerank,
+        accounts=accounts,
     )
     if not rerank:
         return server
-    run_search = server.state.run_search
+    run_search, account_for = server.state.run_search, server.state.account_for
 
     # One call at a time: the queue is Gradio's, and so is the place a visitor waits in it.
     @server.api(name="rerank", concurrency_limit=1)
-    def rerank(query: str, k: int = 5, lectures: list[str] | None = None) -> dict:
+    def rerank(
+        query: str,
+        k: int = 5,
+        lectures: list[str] | None = None,
+        request: gradio.Request = None,
+    ) -> dict:
         """Search, then rescore the fused top results with the cross-encoder."""
+        if account_for(request_cookies(request)) is None:
+            raise gradio.Error(SIGN_IN_FIRST)
         try:
             return run_search(query, int(k), lectures or None, rerank=True)
         except BadRequest as error:
@@ -165,7 +210,8 @@ def create_space_from_env() -> gradio.Server:
     It reads the same variables: ``SLIDESEEK_INDEX``, ``SLIDESEEK_INDEX_REPO``,
     ``SLIDESEEK_EXAMPLES``, ``SLIDESEEK_BENCHMARK`` and ``SLIDESEEK_DEVICE`` (the
     device of the query encoders, ``cpu`` unless set), and one more: ``SLIDESEEK_RERANK``,
-    which turns reranking on when it is ``1``.
+    which turns reranking on when it is ``1``; and ``SLIDESEEK_DATABASE_URL``, where the
+    accounts are kept (see ``default_database_url`` for what happens without it).
     """
     from slideseek.logs import configure_logging
 
@@ -186,6 +232,7 @@ def create_space_from_env() -> gradio.Server:
             os.environ.get("SLIDESEEK_PICTURE_BENCHMARK", "results/screenshot/metrics.json")
         ),
         device=os.environ.get("SLIDESEEK_DEVICE", "cpu"),
+        accounts=accounts_from_env(default_database_url()),
     )
 
 
