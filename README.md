@@ -39,7 +39,7 @@ $ slideseek search --picture photo-of-the-projector.jpg
 |---|---|
 | Indexing pipeline: slide segmentation, OCR, speech recognition, moments, embeddings | Built. Runs end to end with the real models. |
 | Search: BM25 + dense + image, rank fusion, deduplication, explanations, optional reranker | Built. |
-| Search with a picture of a slide: image similarity + OCR, fused | Built and measured on the five real lectures: the right slide comes first for 70 to 86% of pictures and is in the top five for 92 to 97% ([results](#search-by-picture)). |
+| Search with a picture of a slide: image similarity + OCR, fused | Built and measured on the five real lectures: the right slide comes first for 70 to 86% of pictures and is in the top five for 95 to 98% ([results](#search-by-picture)). |
 | CLI, resumable and incremental indexing, publishing to Hugging Face | Built. |
 | Evaluation harness: retrieval ablations, slide transitions, word error rate | Built, and exercised end to end on synthetic lectures. |
 | Web app: search page, player, JSON API, container image, Hugging Face Space | Built. `slideseek serve` runs it on any index. |
@@ -309,13 +309,13 @@ Measured on the five real lectures, with no hand annotation: `eval/eval_screensh
 
 | Query | Image only | OCR only | Both, fused (what the app does) |
 |---|---|---|---|
-| Screenshot of the recording | 86% / 94% | 80% / 88% | **86% / 97%** |
-| Simulated phone photo: perspective, margin, colour, blur, JPEG | 70% / 92% | 65% / 78% | **70% / 95%** |
-| Crop of 55 to 75% of the slide | 80% / 91% | 72% / 86% | **78% / 92%** |
+| Screenshot of the recording | 86% / 97% | 80% / 89% | **86% / 98%** |
+| Simulated phone photo: perspective, margin, colour, blur, JPEG | 70% / 97% | 65% / 78% | **70% / 97%** |
+| Crop of 55 to 75% of the slide | 80% / 95% | 72% / 87% | **78% / 95%** |
 
-<sub>Found first / found in the top five, 100 queries per row, seed 7. Median time per query on an Apple M4 CPU: 0.7 s for the image, 1.2 s for OCR.</sub>
+<sub>Found first / found in the top five, 100 queries per row, seed 7.</sub>
 
-Fusing the two signals mostly helps the top five; the first result is decided by the image. Most misses at rank 1 land on a neighbouring slide. In a check of 60 image-only queries, 4 of the 9 misses were the same slide shown again at another point in the lecture, which this strict count scores as wrong. The phone photos are simulated, not taken with a phone.
+On these pictures OCR adds little. Fused, the top five is at most a point better than the image alone, and for crops the first result is slightly worse (78% against 80%). OCR stays because it is cheap, and because the page can then show the words it read; whether it earns its place needs harder pictures than these, such as real phone photos. Most misses at rank 1 land on a neighbouring slide. In a check of 60 image-only queries, 4 of the 9 misses were the same slide shown again at another point in the lecture, which this strict count scores as wrong. The phone photos are simulated, not taken with a phone.
 
 ```bash
 PYTHONPATH=. python eval/eval_screenshot.py --index index --videos videos --per-lecture 20

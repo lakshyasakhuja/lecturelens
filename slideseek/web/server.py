@@ -179,7 +179,7 @@ def load_picture_benchmark(path: str | Path | None) -> dict[str, Any] | None:
     if not path or not Path(path).is_file():
         return None
     metrics = read_json(path)
-    return {key: metrics.get(key) for key in ("queries", "lectures", "methods", "median_seconds")}
+    return {key: metrics.get(key) for key in ("queries", "lectures", "methods")}
 
 
 def create_app(

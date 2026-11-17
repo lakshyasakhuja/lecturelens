@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import time
 from pathlib import Path
 
 import numpy as np
@@ -145,16 +144,10 @@ def main() -> None:
     print(f"{len(queries)} queries from {len(index.lectures)} lectures")
 
     hits = {(m, v): [] for m in METHODS for v in VARIANTS}
-    timings = {"image": [], "ocr": []}
     for n, query in enumerate(queries, start=1):
         picture = Image.open(query["path"]).convert("RGB")
-        start = time.perf_counter()
         encoding = searcher.encode_picture(picture, read_text=False)
-        timings["image"].append(time.perf_counter() - start)
-        start = time.perf_counter()
-        terms = searcher.read_picture_text(picture)
-        timings["ocr"].append(time.perf_counter() - start)
-        encoding = encoding.with_terms(terms)
+        encoding = encoding.with_terms(searcher.read_picture_text(picture))
         for method, rankers in (
             ("image", ("image",)),
             ("ocr", ("bm25_slide",)),
@@ -184,7 +177,6 @@ def main() -> None:
         "per_lecture": args.per_lecture,
         "seed": args.seed,
         "methods": table,
-        "median_seconds": {k: round(float(np.median(v)), 3) for k, v in timings.items()},
     }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
