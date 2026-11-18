@@ -16,6 +16,11 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.12"]
+    env:
+      # Every uv command uses this Python. Without it, `uv run` follows .python-version
+      # (3.12) and rebuilds the environment without the extras, so the 3.10 job would run
+      # neither 3.10 nor the web tests.
+      UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,10 +36,31 @@ jobs:
       # unit tests cover the logic (segmentation, alignment, fusion, metrics, the API), not
       # the networks.
       - name: Install dependencies
-        run: uv sync --python ${{ matrix.python-version }} --extra eval --extra web --extra space
+        run: uv sync --extra eval --extra web --extra space
 
       - name: Lint
         run: uv run ruff check . && uv run ruff format --check .
+
+      - name: Test
+        run: uv run pytest
+
+  # The core package alone, with no extras: indexing, search and publishing must not need
+  # the web app's libraries. Tests that do need them skip themselves.
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
 
       - name: Test
         run: uv run pytest
