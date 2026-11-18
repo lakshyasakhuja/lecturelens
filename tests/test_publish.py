@@ -233,6 +233,21 @@ def test_push_space_names_a_private_dataset_for_the_accounts(monkeypatch):
     assert not [call for call in calls if "secret" in call[0]]
 
 
+def test_push_space_names_the_default_admin(monkeypatch):
+    calls = []
+    _fake_hub(monkeypatch, calls)
+    push_space("someone/slideseek", "someone/lectures-index", root=ROOT, admin="@Someone")
+    assert ("add_space_variable", "someone/slideseek", "SLIDESEEK_ADMIN", "Someone") in calls
+
+
+def test_push_space_refuses_an_admin_that_cannot_be_a_username(monkeypatch):
+    calls = []
+    _fake_hub(monkeypatch, calls)
+    with pytest.raises(ValueError, match="not a username"):
+        push_space("someone/slideseek", "someone/lectures-index", root=ROOT, admin="two words")
+    assert calls == [], "nothing is touched on the Hub"
+
+
 def test_push_space_refuses_a_public_dataset_for_the_accounts(monkeypatch):
     calls = []
     _fake_hub(monkeypatch, calls)

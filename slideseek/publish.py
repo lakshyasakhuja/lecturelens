@@ -195,6 +195,7 @@ def push_space(
     private: bool = False,
     hardware: str = ZERO_GPU,
     accounts_repo: str | None = None,
+    admin: str | None = None,
 ) -> str:
     """Create or update the Hugging Face Space that serves ``index_repo``. Returns its URL.
 
@@ -205,9 +206,18 @@ def push_space(
     ``accounts_repo`` is the private dataset the Space keeps a copy of its accounts in
     (``slideseek.backup``). It is created, private, if it does not exist, and refused if it
     is public. The token the Space writes to it with is a secret, set on the Space by hand.
+
+    ``admin`` is the username of the default admin (``SLIDESEEK_ADMIN``): an account that
+    has been signed up for on the Space already.
     """
     from huggingface_hub import HfApi
 
+    if admin is not None:
+        from slideseek.accounts import USERNAME_PATTERN
+
+        admin = admin.strip().removeprefix("@")
+        if not USERNAME_PATTERN.fullmatch(admin):
+            raise ValueError(f"{admin!r} is not a username an account can have")
     api = HfApi(token=token)
     api.repo_info(index_repo, repo_type="dataset")  # fail now, not when the Space starts
     if accounts_repo:
@@ -228,6 +238,8 @@ def push_space(
     api.add_space_variable(repo_id, "SLIDESEEK_INDEX_REPO", index_repo)
     if accounts_repo:
         api.add_space_variable(repo_id, "SLIDESEEK_ACCOUNTS_REPO", accounts_repo)
+    if admin:
+        api.add_space_variable(repo_id, "SLIDESEEK_ADMIN", admin)
     with tempfile.TemporaryDirectory() as staging:
         stage_space(staging, root)
         api.upload_folder(

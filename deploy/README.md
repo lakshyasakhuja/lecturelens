@@ -80,6 +80,10 @@ relying on it.
    On a Space that already exists, add it before step 4 instead. Until the secret is
    there the Space does not start, and its *Logs* tab says it cannot reach the dataset.
 
+6. Once the Space runs, sign up on it with the username you want to be the default admin,
+   then deploy again with `--admin <username>` added to the command in step 4 ([why
+   then](#admins)). The account is made an admin when the Space restarts.
+
 The Space then builds for a few minutes, downloads the index and the accounts, loads the
 models and starts. Its *Logs* tab shows each step. Run step 4 again to update the Space
 after changing the code, and step 2 after rebuilding the index.
@@ -89,8 +93,8 @@ benchmark if `results/test/metrics.json` exists, and the three files in `deploy/
 `app.py` (the entry point), `requirements.txt` and `README.md` (the Space's metadata: SDK,
 Gradio version, Python version, models to fetch at build time). It uploads no video and no
 index. The same thing by hand: create a Space with the Gradio SDK and ZeroGPU hardware, add
-the variables `SLIDESEEK_INDEX_REPO` and `SLIDESEEK_ACCOUNTS_REPO` under *Settings →
-Variables and secrets*, and push those files to it.
+the variables `SLIDESEEK_INDEX_REPO`, `SLIDESEEK_ACCOUNTS_REPO` and `SLIDESEEK_ADMIN` under
+*Settings → Variables and secrets*, and push those files to it.
 
 To run the Space's app on your own machine, with the switch, where `@spaces.GPU` does
 nothing and the reranker runs on the CPU:
@@ -145,6 +149,7 @@ and `slideseek/web/auth.py`. In short:
   refused unless they come from the app's own page (`Sec-Fetch-Site`, or `Origin`).
 - Failed sign-ins are limited per address and per account, and sign-ups per address.
 - A visitor can sign out, and can delete their account with its password.
+- Admins can see and change every account, at `/admin` ([Admins](#admins)).
 
 Where the accounts are kept:
 
@@ -175,9 +180,10 @@ HTTPS (`slideseek/backup.py`):
 - Sessions are in the copy too, so a restart signs nobody out.
 - The dataset must be private. It is checked before every download and upload, and a
   public one is refused. `slideseek deploy --accounts-repo` refuses a public one too.
-- When an account is deleted, the dataset's history is squashed into one commit, and the
-  earlier copies are deleted from the Hub's file storage, so the account does not live on
-  in an old version. The history is also squashed every 25 uploads to keep it short.
+- When an account is deleted, or an admin changes one, the dataset's history is squashed
+  into one commit, and the earlier copies are deleted from the Hub's file storage, so the
+  account, or what it said before, does not live on in an old version. The history is also
+  squashed every 25 uploads to keep it short.
 
 This puts the name, email address, phone number and password hash of everyone who signs
 up in a private repository on your Hugging Face account. Anyone who can sign in to that
@@ -202,6 +208,35 @@ are read as psycopg URLs.
 
 With none of these, the Space logs a warning at start-up and keeps accounts in a file
 that the next restart wipes.
+
+### Admins
+
+An admin opens *Manage accounts* in their profile, or goes to `/admin`, and can:
+
+- see every account: name, username, email address, phone number, when it was made, and on
+  how many devices it is signed in. Never a password, which is stored only as a hash;
+- change an account's details, set a new password (which signs the account out
+  everywhere), make it an admin or stop it being one, sign it out everywhere, or delete it;
+- create accounts, admins included. An admin made this way can create admins too.
+
+Every request is checked on the server, against the database, not against what the page
+shows: an admin whose rights were removed is refused from their next request on. An admin
+cannot remove their own admin rights, so the last admin cannot lock everyone out, and
+deletes their own account from their profile, with its password, not from the list.
+Admins' changes are logged by field name, never by value.
+
+**The default admin** is the account whose username `SLIDESEEK_ADMIN` names
+(`slideseek serve --admin`, `slideseek deploy --admin`). At start-up it is made an admin,
+and from then on it is protected: no other admin can change it, sign it out or delete it,
+it cannot stop being an admin, its username cannot be changed, and it cannot be deleted
+from its profile either. Everything else about it, its owner can change.
+
+Sign up first, and name the account afterwards. While no account has the username, nobody
+can sign up with it, so that nobody else can claim it before its owner does; set too early,
+it keeps the owner out as well. Then start once without the setting, sign up, and set it
+again. A Space reads the variable when it starts, and changing a variable restarts it.
+
+The sign-up form tells visitors that the people who run Slideseek can see their details.
 
 ## With Docker
 
@@ -237,6 +272,7 @@ Both ways of running read the same environment variables.
 | `SLIDESEEK_RERANK` | unset | `1` offers "Rerank on a GPU" in the Space's app. Not read by the container. |
 | `SLIDESEEK_ACCOUNTS_REPO` | unset | Private dataset that keeps a copy of the accounts' SQLite file ([Accounts](#on-a-space-a-copy-in-a-private-dataset)). Ignored when `SLIDESEEK_DATABASE_URL` is set. |
 | `SLIDESEEK_ACCOUNTS_TOKEN` | unset | Token that can write to that dataset; a Space **secret**. `HF_TOKEN` is used if this is unset. |
+| `SLIDESEEK_ADMIN` | unset | Username of the default admin ([Admins](#admins)), an account that already exists. A variable, not a secret. |
 | `SLIDESEEK_DATABASE_URL` | `sqlite:///accounts.db` | Where accounts are kept ([Accounts](#other-places)). On a Space, a secret; without it, `/data` if the Space has persistent storage. |
 
 ## Why the frontend is not Gradio's

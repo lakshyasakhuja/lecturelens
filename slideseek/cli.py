@@ -416,6 +416,12 @@ def serve(
         help="Where accounts are kept, as a SQLAlchemy URL. Put a PostgreSQL URL with a "
         "password in the environment variable, not on the command line.",
     ),
+    admin: str | None = typer.Option(
+        None,
+        envvar="SLIDESEEK_ADMIN",
+        help="Username of the default admin: an account you have signed up for. It is made an "
+        "admin, and no other admin can change or delete it.",
+    ),
 ) -> None:
     """Open the search page for an index in your browser.
 
@@ -440,6 +446,14 @@ def serve(
     loaded = load_index(index_dir)
     if videos is not None and not videos.is_dir():
         fail(f"video directory not found: {videos}")
+    accounts = AccountStore(database)
+    if accounts.set_default_admin(admin):
+        console.print(f"The default admin is [bold]{accounts.default_admin}[/bold]")
+    elif admin:
+        console.print(
+            f"[yellow]No account is called {admin.strip().removeprefix('@')}, so there is no "
+            "default admin. Sign up as it first, without --admin, then start again with it.[/yellow]"
+        )
     web_app = create_app(
         loaded,
         videos_dir=videos,
@@ -447,7 +461,7 @@ def serve(
         benchmark=load_benchmark("results/test/metrics.json"),
         picture_benchmark=load_picture_benchmark("results/screenshot/metrics.json"),
         device=device,
-        accounts=(accounts := AccountStore(database)),
+        accounts=accounts,
     )
     console.print(f"Accounts are kept in {redacted(accounts.url)}")
     console.print(f"Slideseek is at [bold]http://{host}:{port}[/bold]  (Ctrl+C to stop)")
@@ -524,6 +538,12 @@ def deploy(
         "Created, private, if missing. The Space also needs the secret "
         "SLIDESEEK_ACCOUNTS_TOKEN, set by hand.",
     ),
+    admin: str | None = typer.Option(
+        None,
+        "--admin",
+        help="Username of the default admin, an account already signed up for on the Space. "
+        "It is made an admin at start-up, and no other admin can change or delete it.",
+    ),
 ) -> None:
     """Deploy the web app as a Hugging Face Space on ZeroGPU, serving a published index.
 
@@ -536,7 +556,12 @@ def deploy(
 
     try:
         url = push_space(
-            repo_id, index_repo, private=private, hardware=hardware, accounts_repo=accounts_repo
+            repo_id,
+            index_repo,
+            private=private,
+            hardware=hardware,
+            accounts_repo=accounts_repo,
+            admin=admin,
         )
     except (FileNotFoundError, ValueError) as err:
         fail(str(err))
