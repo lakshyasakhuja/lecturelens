@@ -392,6 +392,22 @@ def test_earlier_copies_are_kept_if_the_hub_does_not_list_the_current_one(
     assert "permanently_delete_lfs_files" not in hub.calls
 
 
+def test_a_copy_kept_in_git_itself_needs_only_the_squash(
+    hub, opened, tmp_path, monkeypatch, caplog
+):
+    # The Hub keeps a small file in git, not in its file storage, and lists no files there.
+    store, backup, _ = opened(hub, tmp_path)
+    ada = store.sign_up(**ADA)
+    backup.flush()
+    monkeypatch.setattr(hub, "list_lfs_files", lambda *a, **k: [])
+    store.delete_account(ada, ADA["password"])
+    with caplog.at_level(logging.WARNING, logger="slideseek.backup"):
+        assert backup.flush()
+    assert hub.repos[REPO]["commits"] == ["The accounts"]
+    assert "permanently_delete_lfs_files" not in hub.calls
+    assert not caplog.records, "nothing went wrong, so nothing is said to have"
+
+
 def test_deletions_are_told_apart_by_the_name_of_the_change(hub, tmp_path):
     fast_accounts(f"sqlite:///{tmp_path / 'accounts.db'}").sign_up(**ADA)
     backup = DatasetBackup(REPO, tmp_path / "accounts.db", api=hub, delay=3600)

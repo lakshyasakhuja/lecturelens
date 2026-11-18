@@ -181,9 +181,10 @@ HTTPS (`slideseek/backup.py`):
 - The dataset must be private. It is checked before every download and upload, and a
   public one is refused. `slideseek deploy --accounts-repo` refuses a public one too.
 - When an account is deleted, or an admin changes one, the dataset's history is squashed
-  into one commit, and the earlier copies are deleted from the Hub's file storage, so the
-  account, or what it said before, does not live on in an old version. The history is also
-  squashed every 25 uploads to keep it short.
+  into one commit, so the account, or what it said before, does not live on in an old
+  version. A copy small enough to be kept in git itself (the hosted demo's is) goes with
+  the old commits; copies the Hub kept in its large-file storage are deleted from there
+  too. The history is also squashed every 25 uploads to keep it short.
 
 This puts the name, email address, phone number and password hash of everyone who signs
 up in a private repository on your Hugging Face account. Anyone who can sign in to that

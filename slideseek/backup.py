@@ -20,8 +20,9 @@ Three rules keep the copy safe:
 * If the copy exists but cannot be downloaded, or is damaged, start-up fails. Starting with
   no accounts instead would upload an empty database over the real one at the first change.
 * When an account is deleted, or an admin changes one, the dataset's history is squashed,
-  and the earlier copies are deleted from the Hub's file storage, so the account, or what
-  it said before, does not live on in an old commit. The history is also squashed every 25
+  so the account, or what it said before, does not live on in an old commit. Earlier
+  copies in the Hub's large-file storage are deleted from there too; a small file is kept
+  in git itself and goes with the old commits. The history is also squashed every 25
   uploads, to keep it short.
 """
 
@@ -342,6 +343,10 @@ class DatasetBackup:
         that pointed at them, but not the files themselves."""
         try:
             files = list(self.api.list_lfs_files(self.repo_id, repo_type="dataset"))
+            if not files:
+                # A small file is kept in git itself, not in the file storage: squashing
+                # the history was all there was to do.
+                return
             if not any(item.file_oid == current for item in files):
                 # Not the bookkeeping this expects: leave every file alone rather than
                 # risk deleting the copy that the dataset points at now.
