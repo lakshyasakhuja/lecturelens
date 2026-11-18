@@ -248,6 +248,14 @@ def test_push_space_refuses_an_admin_that_cannot_be_a_username(monkeypatch):
     assert calls == [], "nothing is touched on the Hub"
 
 
+def test_deploying_checks_a_username_as_the_accounts_do():
+    pytest.importorskip("phonenumbers", reason="the web extra is not installed")
+    from slideseek.accounts import USERNAME_PATTERN
+    from slideseek.publish import USERNAME
+
+    assert USERNAME.pattern == USERNAME_PATTERN.pattern
+
+
 def test_push_space_refuses_a_public_dataset_for_the_accounts(monkeypatch):
     calls = []
     _fake_hub(monkeypatch, calls)

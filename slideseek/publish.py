@@ -11,6 +11,7 @@ to redistribute derivatives of; private recordings stay on your own machine.
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -149,6 +150,9 @@ def pull_index(repo_id: str, local_dir: str | Path, token: str | None = None) ->
 SPACE_FILES = ("README.md", "app.py", "requirements.txt")
 # ZeroGPU, by the name the Hub's API knows it under.
 ZERO_GPU = "zero-a10g"
+# What a username may be: ``slideseek.accounts.USERNAME_PATTERN``, copied so that deploying
+# does not need the web extra. A test keeps the two the same.
+USERNAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{2,29}")
 
 
 def stage_space(dest: str | Path, root: str | Path = ".") -> Path:
@@ -213,10 +217,8 @@ def push_space(
     from huggingface_hub import HfApi
 
     if admin is not None:
-        from slideseek.accounts import USERNAME_PATTERN
-
         admin = admin.strip().removeprefix("@")
-        if not USERNAME_PATTERN.fullmatch(admin):
+        if not USERNAME.fullmatch(admin):
             raise ValueError(f"{admin!r} is not a username an account can have")
     api = HfApi(token=token)
     api.repo_info(index_repo, repo_type="dataset")  # fail now, not when the Space starts
