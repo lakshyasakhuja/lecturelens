@@ -6,6 +6,7 @@
     POST /api/search/picture        the moments where the slide in a picture was shown  (signed in)
     GET /thumbs/<lecture>/<ms>.jpg  slide thumbnails, straight from the index directory
     GET /                           the frontend (plain HTML, CSS and JavaScript, no build step)
+    GET /admin                      the accounts page, for admins
     /api/account...                 signing up, in and out: see ``auth.py``
     /api/admin/...                  seeing and changing every account (admins): ``admin.py``
 
@@ -507,6 +508,10 @@ def add_frontend(app: FastAPI) -> None:
                 include_in_schema=False,
             )
     app.add_api_route("/", serve("index.html"), methods=["GET", "HEAD"], include_in_schema=False)
+    # The page asks whether the visitor is an admin; the API is what refuses everyone else.
+    app.add_api_route(
+        "/admin", serve("admin.html"), methods=["GET", "HEAD"], include_in_schema=False
+    )
 
 
 def load_index_from_env() -> Index:

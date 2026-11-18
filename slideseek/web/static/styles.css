@@ -2012,6 +2012,410 @@ kbd {
   transform: translate(-50%, 0);
 }
 
+/* ---------------------------------------------------------------- admin
+ *
+ * The accounts page follows the grouped lists of Apple's own settings: a tinted page, one
+ * white rounded group, rows divided by hairlines that start after the picture, and a
+ * chevron to say a row opens.
+ */
+
+.page-admin {
+  background: var(--bg-tinted);
+}
+
+.page-admin .nav {
+  --nav-bg: rgba(245, 245, 247, 0.8);
+}
+
+.admin {
+  padding-block: clamp(36px, 7vw, 72px) 96px;
+}
+
+.admin__container {
+  max-width: calc(980px + 2 * var(--gutter));
+}
+
+.admin__head {
+  margin-bottom: 28px;
+}
+
+.admin__eyebrow {
+  color: var(--text-2);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.022em;
+}
+
+.admin__title {
+  font-size: clamp(40px, 6vw, 56px);
+  line-height: 1.07;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.admin__summary {
+  min-height: 1.47em;
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 19px;
+  line-height: 1.42;
+  letter-spacing: 0.012em;
+}
+
+.admin__state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 56px 28px;
+  border-radius: var(--radius-tile);
+  background: var(--bg);
+  text-align: center;
+}
+
+.admin__state-title {
+  font-size: 24px;
+  line-height: 1.17;
+  font-weight: 600;
+  letter-spacing: 0.009em;
+}
+
+.admin__state-text {
+  max-width: 34em;
+  margin-bottom: 10px;
+  color: var(--text-2);
+}
+
+.admin__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.admin__search {
+  position: relative;
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.admin__search-icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  width: 18px;
+  height: 18px;
+  color: var(--text-2);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.admin__search-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 16px 0 40px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--bg);
+  font-size: 17px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.admin__search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--focus);
+}
+
+.admin__new {
+  gap: 8px;
+  flex: none;
+}
+
+.admin__new svg {
+  width: 12px;
+  height: 12px;
+}
+
+.roster {
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--bg);
+}
+
+.roster[aria-busy="true"] {
+  opacity: 0.6;
+  transition: opacity 0.2s 0.2s;
+}
+
+.roster__item + .roster__item .roster__row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 72px; /* the hairline starts where the text does */
+  border-top: 1px solid var(--hairline);
+}
+
+.roster__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto 12px;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 68px;
+  padding: 12px 18px 12px 16px;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.roster__row:hover {
+  background: rgba(0, 0, 0, 0.025);
+}
+
+.roster__row:active {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.roster__row:focus-visible {
+  outline-offset: -4px;
+  border-radius: 18px;
+}
+
+.avatar.roster__avatar {
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+}
+
+.roster__text {
+  display: grid;
+  min-width: 0;
+}
+
+.roster__name,
+.roster__meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.roster__name {
+  font-weight: 500;
+}
+
+.roster__meta {
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.43;
+  letter-spacing: -0.016em;
+}
+
+.roster__side {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.roster__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.roster__status.is-on::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34c759;
+}
+
+.roster__chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--text-3);
+}
+
+@media (max-width: 560px) {
+  .roster__row {
+    grid-template-columns: 40px minmax(0, 1fr) 12px;
+  }
+
+  .roster__side {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .roster__side .tags:empty {
+    display: none;
+  }
+
+  .roster__chevron {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tags--center {
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.tag {
+  padding: 2px 9px;
+  border-radius: 980px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.tag--admin {
+  background: var(--slide-bg);
+  color: var(--slide);
+}
+
+.tag--default {
+  background: var(--visual-bg);
+  color: var(--visual);
+}
+
+.tag--you {
+  background: var(--field);
+  color: var(--text-2);
+}
+
+.admin__empty {
+  padding: 40px 20px;
+  border-radius: 18px;
+  background: var(--bg);
+  color: var(--text-2);
+  text-align: center;
+}
+
+.admin__more {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.sheet--admin {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.avatar--blank {
+  background: var(--field);
+  color: var(--text-3);
+}
+
+.avatar--blank::before {
+  content: "+";
+  font-size: 36px;
+  font-weight: 300;
+}
+
+.auth__note {
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--slide-bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.43;
+  letter-spacing: -0.016em;
+}
+
+/* A setting with a switch: the words on the left, the switch on the right. */
+.setting {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--bg-tinted);
+  cursor: pointer;
+}
+
+.setting__text {
+  display: grid;
+  gap: 2px;
+}
+
+.setting__title {
+  font-weight: 500;
+}
+
+.setting__detail {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.33;
+  letter-spacing: -0.01em;
+}
+
+.setting .switch__track {
+  width: 51px;
+  height: 31px;
+  border-radius: 16px;
+}
+
+.setting .switch__track::after {
+  width: 27px;
+  height: 27px;
+}
+
+.setting .switch__input:checked + .switch__track::after {
+  transform: translateX(20px);
+}
+
+.setting.is-disabled,
+.field.is-disabled .field__input {
+  cursor: default;
+}
+
+.setting.is-disabled .switch__track {
+  opacity: 0.5;
+}
+
+.field.is-disabled .field__input {
+  border-color: var(--hairline);
+  background: var(--bg-tinted);
+  color: var(--text-2);
+}
+
+.admin__actions {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+  text-align: left;
+}
+
+.admin__confirm {
+  display: grid;
+  gap: 14px;
+}
+
 /* ---------------------------------------------------------------- motion */
 
 .reveal {

@@ -717,6 +717,7 @@
     $("profile-username").textContent = `@${account.username}`;
     $("profile-email").textContent = account.email;
     $("profile-phone").textContent = account.phone;
+    $("admin-link").hidden = !account.admin;
     $("delete-form").hidden = true;
     $("delete-start").setAttribute("aria-expanded", "false");
     $("delete-password").value = "";

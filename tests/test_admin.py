@@ -603,3 +603,45 @@ def test_the_environment_names_the_default_admin(monkeypatch, tmp_path):
     assert store.default_admin == "ada" and store.get(1).is_admin
     monkeypatch.delenv("SLIDESEEK_ADMIN")
     assert accounts_from_env().default_admin is None
+
+
+# ---- the page ------------------------------------------------------------------------------
+
+
+def test_the_accounts_page_is_served_to_anyone_and_shows_nothing_by_itself(app):
+    reply = TestClient(app).get("/admin")
+    assert reply.status_code == 200 and "text/html" in reply.headers["content-type"]
+    assert "Accounts." in reply.text
+    assert "@example.com" not in reply.text, "the accounts come from the API, for admins only"
+    assert TestClient(app).get("/admin.js").status_code == 200
+
+
+def test_the_accounts_page_sends_what_the_api_takes_and_lists_the_same_rules():
+    import re
+
+    from slideseek.accounts import PASSWORD_RULES
+    from slideseek.web.admin import Changes, NewAccount
+    from slideseek.web.server import STATIC_DIR
+
+    html = (STATIC_DIR / "admin.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "admin.js").read_text(encoding="utf-8")
+    inputs = set(re.findall(r'id="admin-(\w+)"', html))
+    assert set(NewAccount.model_fields) <= inputs
+    assert set(Changes.model_fields) <= inputs
+    assert re.findall(r'data-rule="(\w+)"', html) == list(PASSWORD_RULES)
+    for rule in PASSWORD_RULES:
+        assert f"{rule}: (text) =>" in script, f"the page does not check the {rule} rule"
+    assert "document.cookie" not in script and "innerHTML" not in script
+    # Someone else's details are not one's own: no browser should offer to fill them in.
+    for field in ("name", "username", "email", "phone"):
+        assert re.search(rf'id="admin-{field}"[^>]*autocomplete="off"', html), field
+
+
+def test_the_search_page_offers_the_accounts_page_to_admins_only():
+    from slideseek.web.server import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert 'id="admin-link" href="/admin" hidden' in html
+    assert '$("admin-link").hidden = !account.admin;' in script
+    assert "never\n          shown to anyone else" not in html, "admins can see the details now"

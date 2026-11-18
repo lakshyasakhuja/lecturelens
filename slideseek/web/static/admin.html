@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Accounts. Slideseek.</title>
+  <meta name="robots" content="noindex">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f5f5f7">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/admin.js" defer></script>
+</head>
+<body class="page-admin">
+  <a class="skip-link" href="#roster">Skip to the accounts</a>
+
+  <header class="nav is-scrolled">
+    <div class="nav__inner">
+      <a class="nav__brand" href="/" aria-label="Slideseek, back to search">
+        <svg class="nav__mark" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="10.5" cy="10.5" r="6.75" fill="none" stroke="currentColor" stroke-width="1.9"/>
+          <path d="M15.6 15.6 20.5 20.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+          <path d="M9.1 7.9v5.2l4.3-2.6z" fill="currentColor"/>
+        </svg>
+        <span>Slideseek</span>
+      </a>
+      <div class="nav__actions">
+        <a class="button button--compact" href="/">Search</a>
+        <span class="avatar" id="me-avatar" aria-hidden="true" hidden></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="admin">
+    <div class="container admin__container">
+      <div class="admin__head">
+        <p class="admin__eyebrow">Admin</p>
+        <h1 class="admin__title">Accounts.</h1>
+        <p class="admin__summary" id="summary" aria-live="polite"></p>
+      </div>
+
+      <!-- Shown instead of the list to anyone who may not see it, or when it cannot be loaded. -->
+      <div class="admin__state" id="state" hidden>
+        <p class="admin__state-title" id="state-title"></p>
+        <p class="admin__state-text" id="state-text"></p>
+        <a class="button" id="state-action" href="/">Go to Slideseek</a>
+      </div>
+
+      <div id="console" hidden>
+        <div class="admin__toolbar">
+          <form class="admin__search" id="filter" role="search" autocomplete="off">
+            <label class="visually-hidden" for="filter-query">Search the accounts</label>
+            <svg class="admin__search-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6.75" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M15.6 15.6 20.5 20.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <input class="admin__search-input" id="filter-query" type="search" maxlength="254"
+                   placeholder="Search by name, username or email" spellcheck="false" autocapitalize="none">
+          </form>
+          <button class="button admin__new" id="new-account" type="button">
+            <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M2 6h8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            New account
+          </button>
+        </div>
+
+        <ul class="roster" id="roster" aria-label="Accounts" aria-busy="true"></ul>
+        <p class="admin__empty" id="empty" hidden>No account matches that search.</p>
+        <div class="admin__more">
+          <button class="button button--secondary" id="more" type="button" hidden>Show more</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- One account: create a new one, or see and change an existing one -->
+  <dialog class="sheet sheet--account sheet--admin" id="editor" aria-labelledby="editor-title">
+    <form method="dialog" class="sheet__bar">
+      <button class="sheet__close" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </form>
+    <div class="auth">
+      <span class="avatar avatar--large" id="editor-avatar" aria-hidden="true"></span>
+      <h2 class="auth__title" id="editor-title"></h2>
+      <p class="auth__lead" id="editor-lead"></p>
+      <ul class="tags tags--center" id="editor-tags"></ul>
+
+      <form class="auth__form" id="editor-form" novalidate>
+        <p class="auth__note" id="editor-note" hidden></p>
+        <p class="auth__alert" id="editor-alert" role="alert" hidden></p>
+        <div class="field">
+          <input class="field__input" id="admin-name" name="name" type="text" placeholder=" "
+                 autocomplete="off" maxlength="80" aria-describedby="admin-name-error">
+          <label class="field__label" for="admin-name">Name</label>
+          <p class="field__error" id="admin-name-error" hidden></p>
+        </div>
+        <div class="field">
+          <input class="field__input" id="admin-username" name="username" type="text" placeholder=" "
+                 autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="30"
+                 aria-describedby="admin-username-error">
+          <label class="field__label" for="admin-username">Username</label>
+          <p class="field__error" id="admin-username-error" hidden></p>
+        </div>
+        <div class="field">
+          <input class="field__input" id="admin-email" name="email" type="email" placeholder=" "
+                 autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="254"
+                 aria-describedby="admin-email-error">
+          <label class="field__label" for="admin-email">Email address</label>
+          <p class="field__error" id="admin-email-error" hidden></p>
+        </div>
+        <div class="field-group">
+          <div class="field-row">
+            <div class="field field--select">
+              <select class="field__input" id="admin-country" name="country" aria-describedby="admin-phone-error">
+                <option value="">Choose</option>
+              </select>
+              <label class="field__label" for="admin-country">Country code</label>
+              <svg class="field__chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 4.5 3.5 3.5 3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="field">
+              <input class="field__input" id="admin-phone" name="phone" type="tel" placeholder=" "
+                     autocomplete="off" inputmode="tel" maxlength="30" aria-describedby="admin-phone-error">
+              <label class="field__label" for="admin-phone">Phone number</label>
+            </div>
+          </div>
+          <p class="field__error" id="admin-phone-error" hidden></p>
+        </div>
+        <div class="field field--password">
+          <input class="field__input" id="admin-password" name="new-password" type="password" placeholder=" "
+                 autocomplete="new-password" maxlength="128"
+                 passwordrules="minlength: 8; required: lower; required: upper; required: digit; required: special;"
+                 aria-describedby="admin-password-hint admin-rules admin-password-error">
+          <label class="field__label" for="admin-password" id="admin-password-label">Password</label>
+          <button class="field__reveal" type="button" data-reveal="admin-password" aria-pressed="false">Show</button>
+          <p class="field__hint" id="admin-password-hint" hidden>Leave it empty to keep the current password. A new one signs the account out everywhere.</p>
+          <p class="field__error" id="admin-password-error" hidden></p>
+        </div>
+        <ul class="rules" id="admin-rules" aria-label="The password needs">
+          <li data-rule="length">At least 8 characters<span class="visually-hidden" data-rule-state>, not yet</span></li>
+          <li data-rule="upper">An uppercase letter<span class="visually-hidden" data-rule-state>, not yet</span></li>
+          <li data-rule="lower">A lowercase letter<span class="visually-hidden" data-rule-state>, not yet</span></li>
+          <li data-rule="number">A number<span class="visually-hidden" data-rule-state>, not yet</span></li>
+          <li data-rule="special">A special character, such as ! ? # or @<span class="visually-hidden" data-rule-state>, not yet</span></li>
+        </ul>
+        <label class="setting" for="admin-admin">
+          <span class="setting__text">
+            <span class="setting__title" id="admin-admin-title">Admin</span>
+            <span class="setting__detail" id="admin-admin-detail">Can see and change every account, and create admins.</span>
+          </span>
+          <input class="switch__input" id="admin-admin" name="admin" type="checkbox" role="switch" aria-labelledby="admin-admin-title" aria-describedby="admin-admin-detail">
+          <span class="switch__track" aria-hidden="true"></span>
+        </label>
+        <button class="button button--block" id="editor-submit" type="submit">Save</button>
+      </form>
+
+      <div class="auth__danger admin__actions" id="editor-actions" hidden>
+        <p class="auth__alert" id="actions-alert" role="alert" hidden></p>
+        <button class="button button--block button--secondary" id="signout-everywhere" type="button">Sign out everywhere</button>
+        <button class="link link--danger auth__delete" id="remove-start" type="button" aria-expanded="false" aria-controls="remove-confirm">Delete account</button>
+        <div class="admin__confirm" id="remove-confirm" hidden>
+          <p class="auth__fine" id="remove-text"></p>
+          <button class="button button--block button--danger" id="remove-account" type="button"></button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <p class="toast" id="toast" role="status" aria-live="polite"></p>
+
+  <noscript>
+    <p class="noscript">The accounts page needs JavaScript.</p>
+  </noscript>
+</body>
+</html>

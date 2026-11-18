@@ -478,9 +478,10 @@
           <li data-rule="special">A special character, such as ! ? # or @<span class="visually-hidden" data-rule-state>, not yet</span></li>
         </ul>
         <p class="auth__fine">
-          Your name, email address and phone number are used only for your account. They are never
-          shown to anyone else or shared. Your password is stored only as a salted Argon2id hash, never
-          as itself. You can delete your account at any time.
+          Your name, email address and phone number are used only for your account. Only you and the
+          people who run Slideseek can see them, and they are never shared. Your password is stored only
+          as a salted Argon2id hash, never as itself, so nobody can see it. You can delete your account
+          at any time.
         </p>
         <button class="button button--block" type="submit">Create account</button>
         <p class="auth__switch">
@@ -498,6 +499,7 @@
           <div><dt>Phone</dt><dd id="profile-phone"></dd></div>
         </dl>
         <p class="auth__alert" id="profile-alert" role="alert" hidden></p>
+        <a class="button button--block" id="admin-link" href="/admin" hidden>Manage accounts</a>
         <button class="button button--block button--secondary" id="signout-button" type="button">Sign out</button>
         <button class="link link--danger auth__delete" id="delete-start" type="button" aria-expanded="false" aria-controls="delete-form">Delete account</button>
         <form class="auth__form auth__danger" id="delete-form" novalidate hidden>
