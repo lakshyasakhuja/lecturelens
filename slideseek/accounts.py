@@ -27,6 +27,19 @@ How it is kept
     the accounts have to outlive the server. A Hugging Face Space's disk is wiped whenever
     it restarts, so the hosted demo keeps them in SQLite and a copy of the file in a private
     dataset (``slideseek.backup``), told of every change through ``AccountStore.on_change``.
+
+Admins
+
+    An admin sees every account and can change any of them: their details, their password,
+    whether they are an admin, signing them out everywhere and deleting them. An admin can
+    also create accounts, admins included. Every one of those methods takes the admin who is
+    asking, and checks again in the database that they are still one.
+
+    The default admin is the account whose username ``set_default_admin`` names (the server
+    reads it from ``SLIDESEEK_ADMIN``). It is made an admin at start-up, and it is protected:
+    no other admin can change it, it cannot stop being an admin, be renamed or be deleted.
+    While no account has that username, nobody can take it, so that nobody but its owner can
+    become the default admin by signing up first.
 """
 
 from __future__ import annotations
@@ -50,6 +63,7 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 from email_validator import EmailNotValidError, validate_email
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     ForeignKey,
     Integer,
@@ -58,15 +72,20 @@ from sqlalchemy import (
     Table,
     create_engine,
     delete,
+    false,
     func,
     insert,
+    inspect,
     make_url,
     or_,
     select,
+    text,
+    true,
     update,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.schema import CreateColumn
 
 log = logging.getLogger(__name__)
 
@@ -122,9 +141,12 @@ PASSWORD_RULE = (
     f"Use at least {MIN_PASSWORD} characters, with an uppercase letter, a lowercase letter, "
     "a number and a special character."
 )
+DEFAULT_ADMIN_STAYS = "The default admin account is always an admin, and cannot be deleted."
+DEFAULT_ADMIN_NAME = "The default admin's username is set where the server runs, not here."
 
 # What ``AccountStore.on_change`` is told, after the change has been committed.
 ACCOUNT_CREATED = "account created"
+ACCOUNT_UPDATED = "account updated"  # by an admin: details, password or admin rights
 ACCOUNT_DELETED = "account deleted"
 PASSWORD_REHASHED = "password rehashed"
 SESSION_STARTED = "session started"
@@ -145,6 +167,8 @@ users = Table(
     Column("phone", String(20), nullable=False),
     Column("password_hash", String(255), nullable=False),
     Column("created_at", BigInteger, nullable=False),
+    # Added after the first release; ``AccountStore`` adds it to a table made without it.
+    Column("is_admin", Boolean, nullable=False, server_default=false()),
 )
 
 sessions = Table(
@@ -178,6 +202,14 @@ class AccountError(ValueError):
         self.errors = dict(errors)
         self.conflict = conflict
         super().__init__(" ".join(self.errors.values()))
+
+
+class NotAllowed(PermissionError):
+    """The one asking may not do this. The message says why, for them."""
+
+
+class NoSuchAccount(LookupError):
+    """No account has that id (any more)."""
 
 
 # ---- checking what a visitor typed ---------------------------------------------------------
@@ -307,6 +339,7 @@ class Account:
     email: str
     phone: str  # E.164
     created_at: int  # Unix time
+    is_admin: bool = False
 
     def public(self) -> dict[str, Any]:
         """What the account's own holder is shown. Never the password hash."""
@@ -316,7 +349,17 @@ class Account:
             "email": self.email,
             "phone": format_phone(self.phone),
             "created": datetime.fromtimestamp(self.created_at, timezone.utc).date().isoformat(),
+            "admin": self.is_admin,
         }
+
+
+@dataclass(frozen=True)
+class AccountRecord:
+    """An account as an admin sees it in the list: with how many sessions it has open."""
+
+    account: Account
+    sessions: int
+    signed_in_at: int | None  # when the newest open session started
 
 
 def _account(row: Any) -> Account:
@@ -327,7 +370,14 @@ def _account(row: Any) -> Account:
         email=row.email,
         phone=row.phone,
         created_at=row.created_at,
+        is_admin=bool(row.is_admin),
     )
+
+
+def _like(query: str) -> str:
+    """A ``LIKE`` pattern for text that contains ``query``, its wildcards taken literally."""
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 def _digest(token: str) -> str:
@@ -361,9 +411,13 @@ class AccountStore:
 
     ``on_change``, if set, is called with one of the names above (``ACCOUNT_CREATED`` and
     so on) after each change to the database has been committed.
+
+    ``default_admin`` is the lower-cased username of the default admin, or ``None``; set it
+    with ``set_default_admin``.
     """
 
     on_change: Callable[[str], None] | None = None
+    default_admin: str | None = None
 
     def __init__(
         self,
@@ -385,6 +439,7 @@ class AccountStore:
             options = {"pool_pre_ping": True, "pool_recycle": 300, "pool_size": 5}
         self.engine = create_engine(self.url, **options)
         metadata.create_all(self.engine)
+        self._add_missing_columns()
         self.hasher = hasher or PasswordHasher()
         self.session_seconds = int(session_days * 86400)
         self._clock = clock
@@ -395,6 +450,22 @@ class AccountStore:
     def __repr__(self) -> str:
         return f"AccountStore({redacted(self.url)!r})"
 
+    def _add_missing_columns(self) -> None:
+        """Add the columns a later version added to the table that an earlier one made.
+
+        ``create_all`` makes missing tables but leaves existing ones alone, and the hosted
+        demo's accounts were made before there were admins.
+        """
+        present = {column["name"] for column in inspect(self.engine).get_columns(users.name)}
+        missing = [column for column in users.columns if column.name not in present]
+        if not missing:
+            return
+        with self.engine.begin() as db:
+            for column in missing:
+                definition = CreateColumn(column).compile(dialect=self.engine.dialect)
+                db.execute(text(f"ALTER TABLE {users.name} ADD COLUMN {definition}"))
+        log.info("added to the accounts: %s", ", ".join(column.name for column in missing))
+
     def _changed(self, change: str) -> None:
         if self.on_change is None:
             return
@@ -402,6 +473,12 @@ class AccountStore:
             self.on_change(change)
         except Exception:  # the change is made; whoever was told of it failed, not the change
             log.exception("on_change failed after: %s", change)
+
+    def _forget(self, account_id: int) -> None:
+        """Drop what the session cache remembers of an account that has just changed."""
+        with self._cache_lock:
+            for key in [key for key, (held, _, _) in self._cache.items() if held.id == account_id]:
+                del self._cache[key]
 
     # -- signing up
 
@@ -416,24 +493,43 @@ class AccountStore:
         password: Any,
     ) -> Account:
         """Create an account. Raises ``AccountError`` naming every field that needs fixing."""
+        fields = {"name": name, "username": username, "email": email, "password": password}
+        return self._create({**fields, "phone": phone, "country": country}, is_admin=False)
+
+    def _checked(self, fields: Mapping[str, Any]) -> dict[str, str]:
+        """Check each of ``fields`` that is given: ``name``, ``username``, ``email``,
+        ``phone`` (with ``country``) and ``password``. Raises ``AccountError`` naming every
+        one that needs fixing."""
         checks = {
-            "name": lambda: check_name(name),
-            "username": lambda: check_username(username),
-            "email": lambda: check_email(email),
-            "phone": lambda: check_phone(phone, country),
-            "password": lambda: check_password(password),
+            "name": lambda: check_name(fields["name"]),
+            "username": lambda: self._check_username(fields["username"]),
+            "email": lambda: check_email(fields["email"]),
+            "phone": lambda: check_phone(fields["phone"], fields.get("country", "")),
+            "password": lambda: check_password(fields["password"]),
         }
         values, errors = {}, {}
         for field, check in checks.items():
+            if field not in fields:
+                continue
             try:
                 values[field] = check()
             except FieldError as error:
                 errors[field] = str(error)
         if errors:
             raise AccountError(errors)
+        return values
 
+    def _check_username(self, username: Any) -> str:
+        username = check_username(username)
+        if self.default_admin and username.lower() == self.default_admin:
+            # Kept for the default admin, so that nobody else can take it while it is free.
+            raise FieldError("That username is reserved. Choose another.")
+        return username
+
+    def _create(self, fields: Mapping[str, Any], *, is_admin: bool, own: bool = True) -> Account:
+        values = self._checked(fields)
         username_key, address_key = values["username"].lower(), email_key(values["email"])
-        taken = self._taken(username_key, address_key)
+        taken = self._taken(username_key, address_key, own=own)
         if taken:
             raise AccountError(taken, conflict=True)
 
@@ -446,17 +542,18 @@ class AccountStore:
             "phone": values["phone"],
             "password_hash": self.hasher.hash(values["password"]),
             "created_at": int(self._clock()),
+            "is_admin": is_admin,
         }
         try:
             with self.engine.begin() as db:
                 account_id = db.execute(insert(users).values(**row)).inserted_primary_key[0]
         except IntegrityError:
             # Someone else took the name or the address between the check and the insert.
-            taken = self._taken(username_key, address_key)
+            taken = self._taken(username_key, address_key, own=own)
             raise AccountError(
                 taken or {"username": "That username is taken. Choose another."}, conflict=True
             ) from None
-        log.info("account created: %s", values["username"])
+        log.info("account created: %s%s", values["username"], " (an admin)" if is_admin else "")
         self._changed(ACCOUNT_CREATED)
         return Account(
             id=account_id,
@@ -465,20 +562,30 @@ class AccountStore:
             email=row["email"],
             phone=row["phone"],
             created_at=row["created_at"],
+            is_admin=is_admin,
         )
 
-    def _taken(self, username_key: str, address_key: str) -> dict[str, str]:
+    def _taken(
+        self, username_key: str, address_key: str, *, own: bool = True, other_than: int = 0
+    ) -> dict[str, str]:
+        """Which of the username and the address another account has. ``own`` is for
+        someone signing up for themselves; an admin is told it differently."""
         with self.engine.connect() as db:
             rows = db.execute(
                 select(users.c.username_key, users.c.email_key).where(
-                    or_(users.c.username_key == username_key, users.c.email_key == address_key)
+                    or_(users.c.username_key == username_key, users.c.email_key == address_key),
+                    users.c.id != other_than,
                 )
             ).all()
         errors = {}
         if any(row.username_key == username_key for row in rows):
             errors["username"] = "That username is taken. Choose another."
         if any(row.email_key == address_key for row in rows):
-            errors["email"] = "An account with this email address already exists. Sign in instead."
+            errors["email"] = (
+                "An account with this email address already exists. Sign in instead."
+                if own
+                else "Another account has this email address."
+            )
         return errors
 
     # -- signing in
@@ -582,25 +689,277 @@ class AccountStore:
     # -- leaving
 
     def delete_account(self, account: Account, password: Any) -> bool:
-        """Delete ``account`` and end all its sessions, if ``password`` is its password."""
+        """Delete ``account`` and end all its sessions, if ``password`` is its password.
+
+        Raises ``NotAllowed`` for the default admin, which is never deleted.
+        """
+        if self.is_default_admin(account):
+            raise NotAllowed(DEFAULT_ADMIN_STAYS)
         password = password if isinstance(password, str) else ""
         with self.engine.connect() as db:
             row = db.execute(select(users).where(users.c.id == account.id)).first()
         if row is None or not password or not self._verify(row.password_hash, password):
             return False
+        self._delete(account)
+        log.info("account deleted: %s", account.username)
+        return True
+
+    def _delete(self, account: Account) -> None:
         with self.engine.begin() as db:
             db.execute(delete(sessions).where(sessions.c.user_id == account.id))
             db.execute(delete(users).where(users.c.id == account.id))
-        with self._cache_lock:
-            for key in [key for key, (held, _, _) in self._cache.items() if held.id == account.id]:
-                del self._cache[key]
-        log.info("account deleted: %s", account.username)
+        self._forget(account.id)
         self._changed(ACCOUNT_DELETED)
-        return True
 
     def count(self) -> int:
         with self.engine.connect() as db:
             return db.execute(select(func.count()).select_from(users)).scalar_one()
+
+    def count_admins(self) -> int:
+        with self.engine.connect() as db:
+            return db.execute(
+                select(func.count()).select_from(users).where(users.c.is_admin == true())
+            ).scalar_one()
+
+    def get(self, account_id: int) -> Account | None:
+        """The account with this id, as the database has it now."""
+        with self.engine.connect() as db:
+            row = db.execute(select(users).where(users.c.id == account_id)).first()
+        return _account(row) if row else None
+
+    # -- the default admin
+
+    def is_default_admin(self, account: Account) -> bool:
+        return self.default_admin is not None and account.username.lower() == self.default_admin
+
+    def set_default_admin(self, username: str | None) -> Account | None:
+        """Make the account called ``username`` the default admin, and an admin if it is not
+        one yet. ``None`` or ``""`` means there is no default admin. While no account has the
+        username, nobody can sign up with it (see the module's docstring)."""
+        key = str(username or "").strip().removeprefix("@").lower()
+        self.default_admin = key or None
+        if not key:
+            return None
+        if not USERNAME_PATTERN.fullmatch(key):
+            log.warning("the default admin %r is not a username that an account can have", key)
+            return None
+        with self.engine.connect() as db:
+            row = db.execute(select(users).where(users.c.username_key == key)).first()
+        if row is None:
+            log.warning(
+                "no account is called %s, so there is no default admin. The username is kept "
+                "free for its owner: to claim it, start once without the setting, sign up as "
+                "%s, and set it again",
+                key,
+                key,
+            )
+            return None
+        account = _account(row)
+        if account.is_admin:
+            log.info("the default admin is %s", account.username)
+            return account
+        with self.engine.begin() as db:
+            db.execute(update(users).where(users.c.id == account.id).values(is_admin=True))
+        self._forget(account.id)
+        log.info("made %s the default admin", account.username)
+        self._changed(ACCOUNT_UPDATED)
+        return self.get(account.id)
+
+    # -- what admins can do
+
+    def _admin(self, by: Account) -> Account:
+        """``by`` as the database has it now, if it is still an admin."""
+        actor = self.get(by.id)
+        if actor is None or not actor.is_admin:
+            raise NotAllowed("Only an admin can do that.")
+        return actor
+
+    def _target(self, account_id: int) -> Account:
+        target = self.get(account_id)
+        if target is None:
+            raise NoSuchAccount("There is no such account. It may have just been deleted.")
+        return target
+
+    def _guard_default(self, actor: Account, target: Account) -> None:
+        if self.is_default_admin(target) and actor.id != target.id:
+            raise NotAllowed("Only the default admin can change the default admin's account.")
+
+    def list_accounts(
+        self, query: str = "", *, limit: int = 100, offset: int = 0
+    ) -> tuple[list[AccountRecord], int]:
+        """Accounts whose username, name or email address contains ``query``, newest first,
+        and how many match in all. Only for an admin; the caller checks."""
+        now = int(self._clock())
+        open_sessions = (
+            select(
+                sessions.c.user_id,
+                func.count().label("open"),
+                func.max(sessions.c.created_at).label("newest"),
+            )
+            .where(sessions.c.expires_at > now)
+            .group_by(sessions.c.user_id)
+            .subquery()
+        )
+        condition = true()
+        query = " ".join(str(query or "").split()).lower()[:MAX_EMAIL]
+        if query:
+            pattern = _like(query)
+            condition = or_(
+                users.c.username_key.like(pattern, escape="\\"),
+                func.lower(users.c.name).like(pattern, escape="\\"),
+                users.c.email_key.like(pattern, escape="\\"),
+            )
+        with self.engine.connect() as db:
+            total = db.execute(
+                select(func.count()).select_from(users).where(condition)
+            ).scalar_one()
+            rows = db.execute(
+                select(users, open_sessions.c.open, open_sessions.c.newest)
+                .outerjoin(open_sessions, open_sessions.c.user_id == users.c.id)
+                .where(condition)
+                .order_by(users.c.created_at.desc(), users.c.id.desc())
+                .limit(max(1, min(limit, 500)))
+                .offset(max(0, offset))
+            ).all()
+        records = [AccountRecord(_account(row), row.open or 0, row.newest) for row in rows]
+        return records, total
+
+    def create_account(self, by: Account, *, admin: bool = False, **fields: Any) -> Account:
+        """Create an account for someone else: ``name``, ``username``, ``email``, ``phone``,
+        ``country`` and ``password``, as for ``sign_up``. ``admin`` makes it an admin."""
+        actor = self._admin(by)
+        wanted = ("name", "username", "email", "phone", "country", "password")
+        account = self._create(
+            {field: fields.get(field, "") for field in wanted}, is_admin=bool(admin), own=False
+        )
+        log.info("%s created the account %s", actor.username, account.username)
+        return account
+
+    def update_account(
+        self,
+        by: Account,
+        account_id: int,
+        *,
+        name: Any = None,
+        username: Any = None,
+        email: Any = None,
+        phone: Any = None,
+        country: Any = None,
+        password: Any = None,
+        admin: bool | None = None,
+        keep_session: str | None = None,
+    ) -> Account:
+        """Change what is given of an account's details, its password and whether it is an
+        admin. A new password signs the account out everywhere, except, when an admin changes
+        their own, the session ``keep_session``."""
+        actor = self._admin(by)
+        target = self._target(account_id)
+        self._guard_default(actor, target)
+        default = self.is_default_admin(target)
+
+        given = {"name": name, "email": email, "password": password}
+        fields = {field: value for field, value in given.items() if value is not None}
+        if phone is not None:
+            fields.update(phone=phone, country=country or "")
+        try:
+            values, errors = self._checked(fields), {}
+        except AccountError as error:
+            values, errors = {}, dict(error.errors)
+        wanted = None if username is None else str(username).strip()
+        if wanted is not None and wanted != target.username:
+            renamed = wanted.lower() != target.username.lower()
+            try:
+                if renamed and default:
+                    raise FieldError(DEFAULT_ADMIN_NAME)
+                # The same username written with other capitals is still the account's own.
+                values["username"] = (self._check_username if renamed else check_username)(wanted)
+            except FieldError as error:
+                errors["username"] = str(error)
+        if errors:
+            raise AccountError(errors)
+
+        changes: dict[str, Any] = {}
+        if "name" in values and values["name"] != target.name:
+            changes["name"] = values["name"]
+        if "username" in values and values["username"] != target.username:
+            changes["username"] = values["username"]
+            changes["username_key"] = values["username"].lower()
+        if "email" in values and values["email"] != target.email:
+            changes["email"] = values["email"]
+            changes["email_key"] = email_key(values["email"])
+        if "phone" in values and values["phone"] != target.phone:
+            changes["phone"] = values["phone"]
+        if "password" in values:
+            changes["password_hash"] = self.hasher.hash(values["password"])
+        if admin is not None and bool(admin) != target.is_admin:
+            if not admin and default:
+                raise NotAllowed(DEFAULT_ADMIN_STAYS)
+            if not admin and actor.id == target.id:
+                raise NotAllowed("You cannot remove your own admin rights. Ask another admin.")
+            changes["is_admin"] = bool(admin)
+        if not changes:
+            return target
+
+        username_key = changes.get("username_key", target.username.lower())
+        address_key = changes.get("email_key", email_key(target.email))
+        if "username_key" in changes or "email_key" in changes:
+            taken = self._taken(username_key, address_key, own=False, other_than=target.id)
+            if taken:
+                raise AccountError(taken, conflict=True)
+        kept = keep_session if actor.id == target.id else None
+        try:
+            with self.engine.begin() as db:
+                db.execute(update(users).where(users.c.id == target.id).values(**changes))
+                if "password_hash" in changes:
+                    db.execute(self._sessions_of(target.id, kept))
+        except IntegrityError:
+            taken = self._taken(username_key, address_key, own=False, other_than=target.id)
+            raise AccountError(
+                taken or {"username": "That username is taken. Choose another."}, conflict=True
+            ) from None
+        self._forget(target.id)
+        # Which fields, never what they now say.
+        named = ", ".join(sorted(key.removesuffix("_hash") for key in changes if "_key" not in key))
+        log.info("%s changed the account %s: %s", actor.username, target.username, named)
+        self._changed(ACCOUNT_UPDATED)
+        return self._target(target.id)
+
+    def _sessions_of(self, account_id: int, kept: str | None):
+        """The statement that ends every session of an account, but ``kept``."""
+        statement = delete(sessions).where(sessions.c.user_id == account_id)
+        if kept:
+            statement = statement.where(sessions.c.token_hash != _digest(kept))
+        return statement
+
+    def sign_out_everywhere(
+        self, by: Account, account_id: int, *, keep_session: str | None = None
+    ) -> int:
+        """End every session of an account, and say how many there were. An admin signing
+        themselves out everywhere keeps ``keep_session``, the one they are asking from."""
+        actor = self._admin(by)
+        target = self._target(account_id)
+        self._guard_default(actor, target)
+        kept = keep_session if actor.id == target.id else None
+        with self.engine.begin() as db:
+            ended = db.execute(self._sessions_of(target.id, kept)).rowcount
+        self._forget(target.id)
+        if ended:
+            log.info("%s signed %s out everywhere", actor.username, target.username)
+            self._changed(SESSION_ENDED)
+        return ended
+
+    def remove_account(self, by: Account, account_id: int) -> Account:
+        """Delete someone else's account, with all its sessions. Not the default admin's,
+        and not the admin's own: that is ``delete_account``, which asks for the password."""
+        actor = self._admin(by)
+        target = self._target(account_id)
+        if self.is_default_admin(target):
+            raise NotAllowed(DEFAULT_ADMIN_STAYS)
+        if actor.id == target.id:
+            raise NotAllowed("To delete your own account, use Delete account in your profile.")
+        self._delete(target)
+        log.info("%s deleted the account %s", actor.username, target.username)
+        return target
 
 
 class Throttle:

@@ -19,9 +19,10 @@ Three rules keep the copy safe:
 * Nothing is uploaded to a public repository. The dataset is checked before every upload.
 * If the copy exists but cannot be downloaded, or is damaged, start-up fails. Starting with
   no accounts instead would upload an empty database over the real one at the first change.
-* When an account is deleted, the dataset's history is squashed, and the earlier copies are
-  deleted from the Hub's file storage, so the account does not live on in an old commit.
-  The history is also squashed every 25 uploads, to keep it short.
+* When an account is deleted, or an admin changes one, the dataset's history is squashed,
+  and the earlier copies are deleted from the Hub's file storage, so the account, or what
+  it said before, does not live on in an old commit. The history is also squashed every 25
+  uploads, to keep it short.
 """
 
 from __future__ import annotations
@@ -43,9 +44,12 @@ from typing import Any
 
 from sqlalchemy import make_url
 
-from slideseek.accounts import ACCOUNT_DELETED, AccountStore
+from slideseek.accounts import ACCOUNT_DELETED, ACCOUNT_UPDATED, AccountStore
 
 log = logging.getLogger(__name__)
+
+# Changes that leave details in the earlier copies that should be gone: squash after them.
+ERASING = frozenset({ACCOUNT_DELETED, ACCOUNT_UPDATED})
 
 FILENAME = "accounts.db"
 # Seconds from the first change to its upload, so that a burst of changes makes one commit.
@@ -145,7 +149,7 @@ class DatasetBackup:
         self._dirty_since: float | None = None
         self._next_allowed = float("-inf")
         self._failures = 0
-        self._deletions = 0  # accounts deleted, all told
+        self._deletions = 0  # accounts deleted or changed by an admin, all told
         self._squashed = 0  # of which this many are gone from the dataset's history
         self._since_squash = 0
         self._uploaded: str | None = None  # SHA-256 of the copy in the dataset
@@ -246,7 +250,7 @@ class DatasetBackup:
         with self._lock:
             if self._dirty_since is None:
                 self._dirty_since = self._clock()
-            if change == ACCOUNT_DELETED:
+            if change in ERASING:
                 self._deletions += 1
             if self._closed:
                 return  # ``close`` uploads what is left; no thread is started now

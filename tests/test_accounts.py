@@ -64,6 +64,7 @@ def test_signing_up_keeps_what_was_asked_for(store):
         "email": "ada@example.com",
         "phone": "+61 412 345 678",
         "created": account.public()["created"],
+        "admin": False,
     }
     assert "password" not in str(account.public())
 
@@ -112,9 +113,9 @@ def test_a_race_for_the_same_username_is_caught_by_the_database(store, monkeypat
     # As if the other sign-up had not committed yet when this one checked.
     real, checks = store._taken, []
 
-    def first_check_misses(*keys):
+    def first_check_misses(*keys, **options):
         checks.append(keys)
-        return {} if len(checks) == 1 else real(*keys)
+        return {} if len(checks) == 1 else real(*keys, **options)
 
     monkeypatch.setattr(store, "_taken", first_check_misses)
     with pytest.raises(AccountError) as caught:

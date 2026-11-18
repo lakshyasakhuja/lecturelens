@@ -34,6 +34,7 @@ from slideseek.accounts import (
     Account,
     AccountError,
     AccountStore,
+    NotAllowed,
     Throttle,
     phone_regions,
 )
@@ -221,7 +222,11 @@ def add_account_routes(
         wait = per_account.retry_after(key)
         if wait:
             return too_many(wait)
-        if not store.delete_account(account, form.password):
+        try:
+            deleted = store.delete_account(account, form.password)
+        except NotAllowed as error:
+            return problem(403, str(error))
+        if not deleted:
             per_account.record(key)
             return problem(
                 403, "That password is not right.", {"password": "That password is not right."}

@@ -28,7 +28,7 @@ from fakes import ADA, fast_accounts
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError, RepositoryNotFoundError
 
 import slideseek.backup as backup_module
-from slideseek.accounts import ACCOUNT_DELETED
+from slideseek.accounts import ACCOUNT_DELETED, ACCOUNT_UPDATED
 from slideseek.backup import (
     FILENAME,
     BackupError,
@@ -399,6 +399,14 @@ def test_deletions_are_told_apart_by_the_name_of_the_change(hub, tmp_path):
     assert backup.close(timeout=1)
     assert "super_squash_history" not in hub.calls
     backup.changed(ACCOUNT_DELETED)
+    assert backup.close(timeout=1)
+    assert "super_squash_history" in hub.calls
+
+
+def test_an_admins_change_squashes_too_so_the_old_details_go(hub, tmp_path):
+    fast_accounts(f"sqlite:///{tmp_path / 'accounts.db'}").sign_up(**ADA)
+    backup = DatasetBackup(REPO, tmp_path / "accounts.db", api=hub, delay=3600)
+    backup.changed(ACCOUNT_UPDATED)
     assert backup.close(timeout=1)
     assert "super_squash_history" in hub.calls
 

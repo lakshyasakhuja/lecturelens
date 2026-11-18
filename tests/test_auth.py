@@ -90,6 +90,7 @@ def test_signing_up_signs_in_and_unlocks_search(client):
             "email": "ada@example.com",
             "phone": "+61 412 345 678",
             "created": reply.json()["account"]["created"],
+            "admin": False,
         }
     }
     cookie = session_cookie(reply)
