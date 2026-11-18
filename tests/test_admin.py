@@ -376,3 +376,230 @@ def test_the_list_comes_in_pages(store):
     first, total = store.list_accounts(limit=2)
     rest, _ = store.list_accounts(limit=2, offset=2)
     assert total == 3 and len(first) == 2 and len(rest) == 1
+
+
+# ---- over HTTP -----------------------------------------------------------------------------
+
+fastapi = pytest.importorskip("fastapi", reason="the web extra is not installed")
+
+from fakes import FakeImageEmbedder, FakePictureOcr, FakeTextEmbedder, make_index  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from slideseek.accounts import check_phone  # noqa: E402
+from slideseek.search import Searcher  # noqa: E402
+from slideseek.web.auth import COOKIE as COOKIE_NAME  # noqa: E402
+from slideseek.web.server import accounts_from_env, create_app  # noqa: E402
+
+
+@pytest.fixture()
+def app(store):
+    index = make_index()
+    searcher = Searcher(
+        index,
+        text_embedder=FakeTextEmbedder(),
+        image_embedder=FakeImageEmbedder(),
+        ocr=FakePictureOcr(),
+    )
+    return create_app(index, searcher, warm_up=False, accounts=store)
+
+
+def visitor(app, login=None, password=None):
+    """A browser of its own, signed in as ``login`` if one is given."""
+    client = TestClient(app)
+    if login:
+        reply = client.post("/api/account/signin", json={"login": login, "password": password})
+        assert reply.status_code == 200, reply.text
+    return client
+
+
+@pytest.fixture()
+def ada(app):
+    return visitor(app, "ada", ADA["password"])
+
+
+def listed(client, **params):
+    reply = client.get("/api/admin/accounts", params=params)
+    assert reply.status_code == 200, reply.text
+    return reply.json()
+
+
+def account_id(client, username):
+    return next(a["id"] for a in listed(client)["accounts"] if a["username"] == username)
+
+
+def test_nobody_signed_in_and_anyone_but_an_admin_are_refused(app, store):
+    routes = [
+        ("GET", "/api/admin/accounts", None),
+        ("POST", "/api/admin/accounts", {**ALAN, "username": "x1"}),
+        ("PATCH", "/api/admin/accounts/1", {"name": "Someone"}),
+        ("POST", "/api/admin/accounts/1/signout", None),
+        ("DELETE", "/api/admin/accounts/1", None),
+    ]
+    stranger, grace = visitor(app), visitor(app, "grace", GRACE["password"])
+    for method, path, body in routes:
+        assert stranger.request(method, path, json=body).status_code == 401, (method, path)
+        assert grace.request(method, path, json=body).status_code == 403, (method, path)
+    assert store.get(1).name == "Ada Lovelace" and store.count() == 3
+
+
+def test_an_admin_sees_every_account_but_never_a_password(ada, app):
+    visitor(app, "grace", GRACE["password"])
+    body = listed(ada)
+    assert (body["total"], body["all"], body["admins"]) == (3, 3, 1)
+    grace = next(a for a in body["accounts"] if a["username"] == "grace")
+    assert grace == {
+        "id": grace["id"],
+        "username": "grace",
+        "name": "Grace Hopper",
+        "email": "grace@example.com",
+        "phone": "+61 412 345 678",
+        "country": "AU",
+        "national": "0412 345 678",
+        "created": grace["created"],
+        "admin": False,
+        "default": False,
+        "you": False,
+        "sessions": 1,
+        "signed_in": grace["signed_in"],
+    }
+    me = next(a for a in body["accounts"] if a["username"] == "ada")
+    assert me["default"] and me["you"] and me["admin"]
+    text = ada.get("/api/admin/accounts").text
+    assert "argon2" not in text and GRACE["password"] not in text
+    assert ada.get("/api/admin/accounts").headers["cache-control"] == "no-store"
+    assert [a["username"] for a in listed(ada, q="turing")["accounts"]] == ["alan"]
+
+
+def test_the_phone_number_an_admin_is_shown_goes_back_into_the_form_unchanged(ada):
+    for account in listed(ada)["accounts"]:
+        assert check_phone(account["national"], account["country"]) == check_phone(account["phone"])
+
+
+def test_an_admin_creates_an_account_and_an_admin(ada, app):
+    reply = ada.post("/api/admin/accounts", json={**ALAN, "username": "edsger", "email": "e@x.org"})
+    assert reply.status_code == 201 and reply.json()["account"]["admin"] is False
+    reply = ada.post(
+        "/api/admin/accounts",
+        json={**ALAN, "username": "barbara", "email": "b@x.org", "admin": True},
+    )
+    assert reply.status_code == 201 and reply.json()["account"]["admin"] is True
+    barbara = visitor(app, "barbara", ALAN["password"])
+    assert barbara.get("/api/account").json()["account"]["admin"] is True
+    assert listed(barbara)["admins"] == 2
+    assert COOKIE_NAME not in reply.headers.get("set-cookie", ""), "the admin stays themselves"
+
+
+def test_creating_names_each_field_to_fix(ada):
+    reply = ada.post("/api/admin/accounts", json={"name": "", "username": "a b"})
+    assert reply.status_code == 400
+    assert set(reply.json()["errors"]) == {"name", "username", "email", "phone", "password"}
+    reply = ada.post("/api/admin/accounts", json={**GRACE, "username": "grace2"})
+    assert reply.status_code == 409
+    assert reply.json()["errors"] == {"email": "Another account has this email address."}
+
+
+def test_an_admin_changes_an_account(ada, app):
+    grace = visitor(app, "grace", GRACE["password"])
+    target = account_id(ada, "grace")
+    reply = ada.patch(
+        f"/api/admin/accounts/{target}",
+        json={"name": "Grace Brewster Hopper", "country": "US", "phone": "(202) 555-0143"},
+    )
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["account"]["phone"] == "+1 202-555-0143"
+    assert grace.get("/api/account").json()["account"]["name"] == "Grace Brewster Hopper"
+    reply = ada.patch(f"/api/admin/accounts/{target}", json={"password": NEW_PASSWORD})
+    assert reply.status_code == 200
+    assert grace.get("/api/account").json() == {"account": None}, "signed out by a new password"
+    visitor(app, "grace", NEW_PASSWORD)
+
+
+def test_a_change_that_needs_fixing_or_is_not_allowed_is_refused(ada, app):
+    target = account_id(ada, "grace")
+    reply = ada.patch(f"/api/admin/accounts/{target}", json={"email": "nope", "password": "x"})
+    assert reply.status_code == 400 and set(reply.json()["errors"]) == {"email", "password"}
+    reply = ada.patch(f"/api/admin/accounts/{target}", json={"username": "alan"})
+    assert reply.status_code == 409
+    reply = ada.patch(f"/api/admin/accounts/{account_id(ada, 'ada')}", json={"admin": False})
+    assert reply.status_code == 403 and "always an admin" in reply.json()["detail"]
+    reply = ada.patch("/api/admin/accounts/999", json={"name": "Nobody"})
+    assert reply.status_code == 404 and "no such account" in reply.json()["detail"]
+
+
+def test_an_admin_changing_their_own_password_stays_signed_in(ada, app):
+    elsewhere = visitor(app, "ada", ADA["password"])
+    reply = ada.patch(
+        f"/api/admin/accounts/{account_id(ada, 'ada')}", json={"password": NEW_PASSWORD}
+    )
+    assert reply.status_code == 200
+    assert ada.get("/api/account").json()["account"]["username"] == "ada"
+    assert elsewhere.get("/api/account").json() == {"account": None}
+
+
+def test_another_admin_cannot_touch_the_default_admin(ada, app):
+    ada.patch(f"/api/admin/accounts/{account_id(ada, 'grace')}", json={"admin": True})
+    grace = visitor(app, "grace", GRACE["password"])
+    me = account_id(ada, "ada")
+    for method, path, body in (
+        ("PATCH", f"/api/admin/accounts/{me}", {"password": NEW_PASSWORD}),
+        ("POST", f"/api/admin/accounts/{me}/signout", None),
+        ("DELETE", f"/api/admin/accounts/{me}", None),
+    ):
+        assert grace.request(method, path, json=body).status_code == 403, (method, path)
+    assert ada.get("/api/account").json()["account"]["username"] == "ada"
+
+
+def test_an_admin_whose_rights_are_taken_is_refused_on_the_next_request(ada, app):
+    grace_id = account_id(ada, "grace")
+    ada.patch(f"/api/admin/accounts/{grace_id}", json={"admin": True})
+    grace = visitor(app, "grace", GRACE["password"])
+    assert grace.get("/api/admin/accounts").status_code == 200
+    ada.patch(f"/api/admin/accounts/{grace_id}", json={"admin": False})
+    assert grace.get("/api/admin/accounts").status_code == 403
+    assert grace.get("/api/account").json()["account"]["admin"] is False
+
+
+def test_an_admin_signs_an_account_out_everywhere_and_deletes_it(ada, app, store):
+    grace = visitor(app, "grace", GRACE["password"])
+    target = account_id(ada, "grace")
+    reply = ada.post(f"/api/admin/accounts/{target}/signout")
+    assert reply.json() == {"ended": 1}
+    assert grace.get("/api/account").json() == {"account": None}
+    assert ada.delete(f"/api/admin/accounts/{target}").status_code == 204
+    assert store.get(target) is None
+    assert ada.delete(f"/api/admin/accounts/{target}").status_code == 404
+    reply = ada.delete(f"/api/admin/accounts/{account_id(ada, 'ada')}")
+    assert reply.status_code == 403
+
+
+def test_the_default_admin_cannot_delete_their_account_from_the_profile(ada):
+    reply = ada.request("DELETE", "/api/account", json={"password": ADA["password"]})
+    assert reply.status_code == 403 and "cannot be deleted" in reply.json()["detail"]
+    assert ada.get("/api/account").json()["account"]["username"] == "ada"
+
+
+@pytest.mark.parametrize(
+    "headers", [{"Sec-Fetch-Site": "cross-site"}, {"Origin": "https://evil.example"}]
+)
+def test_admin_requests_from_other_sites_are_refused(ada, headers):
+    target = account_id(ada, "grace")
+    for method, path, body in (
+        ("POST", "/api/admin/accounts", {**ALAN, "username": "x1", "email": "x@x.org"}),
+        ("PATCH", f"/api/admin/accounts/{target}", {"admin": True}),
+        ("POST", f"/api/admin/accounts/{target}/signout", None),
+        ("DELETE", f"/api/admin/accounts/{target}", None),
+    ):
+        assert ada.request(method, path, json=body, headers=headers).status_code == 403
+    assert listed(ada)["admins"] == 1 and listed(ada)["all"] == 3
+
+
+def test_the_environment_names_the_default_admin(monkeypatch, tmp_path):
+    url = f"sqlite:///{tmp_path / 'accounts.db'}"
+    fast_accounts(url).sign_up(**ADA)
+    monkeypatch.setenv("SLIDESEEK_DATABASE_URL", url)
+    monkeypatch.delenv("SLIDESEEK_ACCOUNTS_REPO", raising=False)
+    monkeypatch.setenv("SLIDESEEK_ADMIN", "ada")
+    store = accounts_from_env()
+    assert store.default_admin == "ada" and store.get(1).is_admin
+    monkeypatch.delenv("SLIDESEEK_ADMIN")
+    assert accounts_from_env().default_admin is None

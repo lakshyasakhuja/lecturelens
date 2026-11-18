@@ -7,6 +7,7 @@
     GET /thumbs/<lecture>/<ms>.jpg  slide thumbnails, straight from the index directory
     GET /                           the frontend (plain HTML, CSS and JavaScript, no build step)
     /api/account...                 signing up, in and out: see ``auth.py``
+    /api/admin/...                  seeing and changing every account (admins): ``admin.py``
 
 Searching needs an account. Without one, the page and what the library contains are still
 shown, but a search is answered with 401 until the visitor signs in.
@@ -47,6 +48,7 @@ from slideseek.catalog import VIDEO_EXTENSIONS, Lecture
 from slideseek.index import Index
 from slideseek.search import PICTURE_RANKERS, Result, Searcher
 from slideseek.utils import format_timestamp, read_json
+from slideseek.web.admin import add_admin_routes
 from slideseek.web.auth import UNSAFE_METHODS, add_account_routes, same_origin
 
 log = logging.getLogger(__name__)
@@ -263,6 +265,7 @@ def create_app(
         return response
 
     add_account_routes(app, accounts)
+    add_admin_routes(app, accounts)
 
     def signed_in(request: Request) -> Account:
         account = app.state.account_for(request.cookies)
@@ -533,6 +536,8 @@ def accounts_from_env(default: str = DEFAULT_DATABASE_URL) -> AccountStore:
     ``SLIDESEEK_ACCOUNTS_REPO`` set and no database URL, the accounts are kept in the SQLite
     file ``default`` names, with a copy in that private Hugging Face dataset
     (``slideseek.backup``), written with the token from ``accounts_token_from_env``.
+
+    ``SLIDESEEK_ADMIN`` names the default admin's username (``AccountStore.set_default_admin``).
     """
     url = os.environ.get("SLIDESEEK_DATABASE_URL", "").strip()
     repo = os.environ.get("SLIDESEEK_ACCOUNTS_REPO", "").strip()
@@ -545,9 +550,11 @@ def accounts_from_env(default: str = DEFAULT_DATABASE_URL) -> AccountStore:
         log.info(
             "accounts are kept in %s, with a copy in the dataset %s", redacted(store.url), repo
         )
-        return store
-    store = AccountStore(url or default)
-    log.info("accounts are kept in %s", redacted(store.url))
+    else:
+        store = AccountStore(url or default)
+        log.info("accounts are kept in %s", redacted(store.url))
+    # After the copy is watched, so that making the default admin is copied too.
+    store.set_default_admin(os.environ.get("SLIDESEEK_ADMIN"))
     return store
 
 
@@ -570,6 +577,7 @@ def create_app_from_env() -> FastAPI:
     ``SLIDESEEK_ACCOUNTS_REPO``  a private Hugging Face dataset to keep a copy of the
                                 accounts' SQLite file in, for a disk that does not last
     ``SLIDESEEK_ACCOUNTS_TOKEN``  a token that can write to that dataset (or ``HF_TOKEN``)
+    ``SLIDESEEK_ADMIN``       the username of the default admin, an account that exists
     """
     from slideseek.logs import configure_logging
 

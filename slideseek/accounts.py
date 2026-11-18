@@ -291,6 +291,19 @@ def format_phone(e164: str) -> str:
     return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
 
 
+def phone_parts(e164: str) -> tuple[str, str]:
+    """``+61412345678`` as the sign-up form takes it: its region and the number as it is
+    written there, ``("AU", "0412 345 678")``."""
+    try:
+        parsed = phonenumbers.parse(e164, None)
+    except phonenumbers.NumberParseException:
+        return "", e164
+    region = phonenumbers.region_code_for_number(parsed) or ""
+    if not region or region == "001":  # a number for no one country, such as a satellite
+        return "", phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+    return region, phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.NATIONAL)
+
+
 def unmet_password_rules(password: str) -> list[str]:
     """The names of the ``PASSWORD_RULES`` that ``password`` does not meet."""
     kinds = {unicodedata.category(char) for char in password}
