@@ -10,6 +10,11 @@
  * or doubled at a block boundary. Inside a block, transformers.js cuts the audio into
  * 30-second windows that overlap by 5 seconds and joins them.
  *
+ * The model's files are kept in the origin's private file system (``speechCache``), not in
+ * the Cache API that transformers.js uses by default: Chrome refuses to put the 370 MB
+ * encoder there ("Unexpected internal error"), and every lecture would download it again.
+ * Once every file is kept, a marker named after the model's revision says so, for the page.
+ *
  * Messages in:
  *   { type: "load", model, revision, dtype, device }
  *   { type: "transcribe", audio: Float32Array, blockSeconds, padSeconds, prompt, from }
@@ -27,6 +32,59 @@ const SAMPLE_RATE = 16000;
 
 env.allowLocalModels = false;
 env.backends.onnx.wasm.wasmPaths = new URL("../vendor/browser/", import.meta.url).href;
+
+export const CACHE_DIR = "slideseek-speech";
+
+async function cacheName(key) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(key)));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** What transformers.js needs of a cache, over files on disk: match(key) and put(key, response). */
+export const speechCache = {
+  failures: 0,
+  async folder() {
+    return (await navigator.storage.getDirectory()).getDirectoryHandle(CACHE_DIR, { create: true });
+  },
+  async match(key) {
+    try {
+      const handle = await (await this.folder()).getFileHandle(await cacheName(key));
+      const file = await handle.getFile();
+      if (!file.size) return undefined;
+      return new Response(file, { headers: { "content-length": String(file.size) } });
+    } catch {
+      return undefined;
+    }
+  },
+  async put(key, response) {
+    const folder = await this.folder();
+    const name = await cacheName(key);
+    const partial = await folder.getFileHandle(`${name}.partial`, { create: true });
+    try {
+      if (typeof partial.createWritable === "function") {
+        await response.body.pipeTo(await partial.createWritable());
+      } else {
+        const access = await partial.createSyncAccessHandle(); // Safari, in a worker
+        try {
+          access.truncate(0);
+          access.write(new Uint8Array(await response.arrayBuffer()), { at: 0 });
+          access.flush();
+        } finally {
+          access.close();
+        }
+      }
+      await partial.move(name);
+    } catch (error) {
+      this.failures += 1;
+      await folder.removeEntry(`${name}.partial`).catch(() => {});
+      throw error;
+    }
+  },
+};
+
+env.useBrowserCache = false;
+env.useCustomCache = true;
+env.customCache = speechCache;
 
 let transcriber = null;
 
@@ -52,6 +110,7 @@ export function mergeWordPieces(pieces) {
 
 async function load({ model, revision, dtype, device = "webgpu" }) {
   const started = performance.now();
+  speechCache.failures = 0;
   transcriber = await pipeline("automatic-speech-recognition", model, {
     revision,
     device,
@@ -62,6 +121,16 @@ async function load({ model, revision, dtype, device = "webgpu" }) {
       }
     },
   });
+  if (!speechCache.failures) {
+    // Every file is on disk: say so, for the page to tell the visitor nothing will download.
+    const folder = await speechCache.folder();
+    const marker = await folder.getFileHandle(`${revision}.ready`, { create: true });
+    const writable = await marker.createWritable?.();
+    if (writable) {
+      await writable.write(model);
+      await writable.close();
+    }
+  }
   post({ type: "loaded", seconds: (performance.now() - started) / 1000 });
 }
 

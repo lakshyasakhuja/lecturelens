@@ -75,6 +75,8 @@ PICTURE_SIDE = 1600
 # Where accounts are kept when nothing says otherwise: a file beside where the server runs.
 DEFAULT_DATABASE_URL = "sqlite:///accounts.db"
 SIGN_IN_FIRST = "Sign in to search."
+# Files a browser must check are current before using a copy it kept.
+REVALIDATED = (".html", ".js", ".mjs", ".css", ".wasm")
 # What a search covers: everything the visitor can search, only their own lectures, or only
 # the public ones.
 SCOPES = ("all", "mine", "public")
@@ -97,7 +99,9 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "style-src 'self'",
         # blob: is the visitor's own picture, previewed before it is searched.
         "img-src 'self' data: blob: https://i.ytimg.com",
-        "media-src 'self'",
+        # blob: is a recording on the visitor's own computer: read to add it as a lecture,
+        # and played from there.
+        "media-src 'self' blob:",
         "frame-src https://www.youtube-nocookie.com",
         "base-uri 'none'",
         "form-action 'self'",
@@ -105,13 +109,13 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "frame-ancestors 'self' https://huggingface.co https://*.hf.space",
     ]
 )
-# Adding a lecture in the browser (static/capture/): the visitor's own file is read
-# through a blob: URL, ONNX Runtime compiles WebAssembly and runs in a worker, and Whisper's
-# weights come from the Hugging Face Hub, which hands the download on to storage under hf.co.
+# Adding a lecture in the browser (static/capture/): ONNX Runtime compiles WebAssembly and
+# runs in a worker, and Whisper's weights come from the Hugging Face Hub, which hands the
+# download on to storage under hf.co. A worker is governed by the policy it was served with,
+# so only the worker's scripts get this one; the page that starts the worker does not.
 SPEECH_PATHS = ("/capture/", "/vendor/browser/", "/lab/")
 SPEECH_CONTENT_SECURITY_POLICY = (
     CONTENT_SECURITY_POLICY.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")
-    .replace("media-src 'self'", "media-src 'self' blob:")
     .replace(
         "default-src 'self'",
         "default-src 'self'; worker-src 'self'; "
@@ -311,6 +315,10 @@ def create_app(
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         if request.url.path.startswith("/thumbs/"):
             response.headers.setdefault("Cache-Control", "public, max-age=86400")
+        elif request.url.path == "/" or request.url.path.endswith(REVALIDATED):
+            # The page, its scripts and the speech worker change together: a browser must
+            # check each is current (a cheap 304 when it is), never mix an old one with new.
+            response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
     add_account_routes(app, accounts)
@@ -483,6 +491,8 @@ def create_app(
                 "max_bytes": MAX_PICTURE_BYTES,
                 "benchmark": picture_benchmark,
             },
+            # Can people add their own lectures here? The page offers it only if so.
+            "own_lectures": library is not None,
         }
 
     def run_search(

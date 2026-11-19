@@ -2441,6 +2441,353 @@ kbd {
   transition-delay: 0.16s;
 }
 
+/* ---------------------------------------------------------------- your own lectures
+ *
+ * Adding a lecture follows the account sheet: one column, a blue pill to continue, and the
+ * work shown as a checklist that fills in, with one bar for the step under way.
+ */
+
+/* The scope switch: a segmented control, as in Apple's own apps. */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 980px;
+  background: var(--field);
+}
+
+.segmented__option {
+  padding: 4px 14px;
+  border-radius: 980px;
+  font-size: 14px;
+  line-height: 1.43;
+  letter-spacing: -0.016em;
+  color: var(--text-2);
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+
+.segmented__option:hover {
+  color: var(--text);
+}
+
+.segmented__option[aria-checked="true"] {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.segmented__option:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+.yours__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 22px;
+  margin-bottom: 28px;
+}
+
+.yours__note {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.yours__list:empty {
+  display: none;
+}
+
+.lecture--own .lecture__actions {
+  align-items: center;
+}
+
+.lecture__error {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #c4001a;
+}
+
+.lecture__confirm {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.rename {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+.rename__input {
+  flex: 1 1 260px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid #86868b;
+  border-radius: 12px;
+  background: var(--bg);
+  font-size: 17px;
+  letter-spacing: -0.022em;
+}
+
+.rename__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--focus);
+}
+
+.rename .link {
+  font-size: 14px;
+}
+
+/* The sheet */
+.sheet--adder {
+  width: min(520px, calc(100vw - 32px));
+  background: var(--bg);
+}
+
+.adder {
+  padding: 4px clamp(22px, 6vw, 44px) 40px;
+  text-align: center;
+}
+
+.adder__mark {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 14px;
+  color: var(--accent);
+}
+
+.adder__title {
+  font-size: clamp(24px, 4vw, 28px);
+  line-height: 1.14;
+  font-weight: 600;
+  letter-spacing: 0.007em;
+  overflow-wrap: anywhere;
+}
+
+.adder__lead {
+  margin-top: 8px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.adder__lead:empty {
+  display: none;
+}
+
+.adder__form,
+.adder__work {
+  display: grid;
+  gap: 14px;
+  margin-top: 28px;
+  text-align: left;
+}
+
+.adder__file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--field);
+}
+
+.adder__file-words {
+  min-width: 0;
+}
+
+.adder__file-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adder__file-meta {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.adder__file .link {
+  flex: none;
+  font-size: 14px;
+}
+
+.adder__facts {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  color: var(--text-2);
+}
+
+.adder__facts li {
+  position: relative;
+  padding-left: 16px;
+}
+
+.adder__facts li::before {
+  content: "";
+  position: absolute;
+  top: 0.62em;
+  left: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.adder__note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+  text-align: center;
+}
+
+/* The checklist of steps */
+.steps {
+  display: grid;
+  gap: 2px;
+}
+
+.steps__item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  color: var(--text-3);
+  transition: color 0.2s;
+}
+
+.steps__item[hidden] {
+  display: none;
+}
+
+.steps__item.is-active,
+.steps__item.is-done {
+  color: var(--text);
+}
+
+.steps__mark {
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.6;
+}
+
+.steps__item.is-active .steps__mark {
+  border-color: var(--accent);
+  border-right-color: transparent;
+  opacity: 1;
+  animation: spin 0.9s linear infinite;
+}
+
+.steps__item.is-done .steps__mark {
+  border-color: #34c759;
+  background: #34c759
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 6.2 2 2 4-4.4' fill='none' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 12px no-repeat;
+  opacity: 1;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.steps__label {
+  font-size: 17px;
+  letter-spacing: -0.022em;
+}
+
+.steps__item.is-active .steps__label {
+  font-weight: 600;
+}
+
+.steps__detail {
+  font-size: 14px;
+  color: var(--text-2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* One bar for the step under way; without a value it says "working" and nothing more. */
+.meter {
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--field);
+  overflow: hidden;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.meter::-webkit-progress-bar {
+  border-radius: 3px;
+  background: var(--field);
+}
+
+.meter::-webkit-progress-value {
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.3s var(--ease);
+}
+
+.meter::-moz-progress-bar {
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.meter:indeterminate {
+  background: linear-gradient(90deg, var(--field) 0%, rgba(0, 113, 227, 0.35) 50%, var(--field) 100%)
+    0 0 / 200% 100%;
+  animation: sweep 1.4s linear infinite;
+}
+
+.meter:indeterminate::-webkit-progress-bar {
+  background: transparent;
+}
+
+.meter:indeterminate::-moz-progress-bar {
+  background: transparent;
+}
+
+@keyframes sweep {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* Playing your own lecture: until its file is chosen, the frame asks for it. */
+.pick {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 18px;
+  height: 100%;
+  padding: 24px;
+  color: #f5f5f7;
+  text-align: center;
+}
+
+.pick__text {
+  max-width: 440px;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

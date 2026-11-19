@@ -29,6 +29,7 @@
         <a href="#signals">Signals</a>
         <a href="#how">How it works</a>
         <a href="#library">Library</a>
+        <a href="#yours" id="nav-yours" hidden>Yours</a>
         <a href="#benchmark">Benchmark</a>
         <a href="https://github.com/lakshyasakhuja/slideseek" rel="noopener">GitHub</a>
       </nav>
@@ -90,6 +91,11 @@
                   <option value="">All lectures</option>
                 </select>
                 <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 4.5 3.5 3.5 3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <div class="segmented" id="scope" role="radiogroup" aria-label="Which lectures to search" hidden>
+                <button class="segmented__option" type="button" role="radio" aria-checked="true" data-scope="all">All</button>
+                <button class="segmented__option" type="button" role="radio" aria-checked="false" data-scope="mine">Yours</button>
+                <button class="segmented__option" type="button" role="radio" aria-checked="false" data-scope="public" id="scope-public">Public</button>
               </div>
               <label class="switch" id="rerank-option" title="Rescore the top results with a cross-encoder on a GPU. Slower, and it uses your free GPU time on Hugging Face." hidden>
                 <input class="switch__input" id="rerank" type="checkbox" role="switch">
@@ -319,6 +325,26 @@
       </div>
     </section>
 
+    <!-- Your own lectures -->
+    <section class="section" id="yours" aria-labelledby="yours-title" hidden>
+      <div class="container">
+        <div class="section__head reveal">
+          <h2 class="headline" id="yours-title">Your lectures.</h2>
+          <p class="lead">
+            Add a recording from your computer and search it beside these. Your browser watches and
+            listens to it <strong>on your computer</strong>, so the video never leaves it. Only its
+            slides and its words come here, kept privately for your account.
+          </p>
+        </div>
+        <div class="yours__bar reveal">
+          <button class="button" id="add-lecture" type="button">Add a lecture</button>
+          <p class="yours__note" id="yours-note">Or drop a recording anywhere on this page.</p>
+        </div>
+        <ul class="library yours__list" id="yours-list" aria-live="polite"></ul>
+        <input class="visually-hidden" id="recording-input" type="file" accept="video/*,.mp4,.m4v,.mov,.webm,.mkv" tabindex="-1" aria-hidden="true">
+      </div>
+    </section>
+
     <!-- Benchmark -->
     <section class="section section--tinted" id="benchmark">
       <div class="container">
@@ -480,8 +506,10 @@
         <p class="auth__fine">
           Your name, email address and phone number are used only for your account. Only you and the
           people who run Slideseek can see them, and they are never shared. Your password is stored only
-          as a salted Argon2id hash, never as itself, so nobody can see it. You can delete your account
-          at any time.
+          as a salted Argon2id hash, never as itself, so nobody can see it. If you add lectures of your
+          own, their slides and what was said in them are kept for your account alone: nobody else can
+          search them, and the people who run Slideseek see only how many there are. You can delete your
+          account at any time, and they go with it.
         </p>
         <button class="button button--block" type="submit">Create account</button>
         <p class="auth__switch">
@@ -500,12 +528,13 @@
         </dl>
         <p class="auth__alert" id="profile-alert" role="alert" hidden></p>
         <a class="button button--block" id="admin-link" href="/admin" hidden>Manage accounts</a>
+        <a class="button button--block button--secondary" id="yours-link" href="#yours" hidden>Your lectures</a>
         <button class="button button--block button--secondary" id="signout-button" type="button">Sign out</button>
         <button class="link link--danger auth__delete" id="delete-start" type="button" aria-expanded="false" aria-controls="delete-form">Delete account</button>
         <form class="auth__form auth__danger" id="delete-form" novalidate hidden>
           <p class="auth__fine">
-            This deletes your account, with your name, email address and phone number, and signs you
-            out everywhere. It cannot be undone.
+            This deletes your account, with your name, email address and phone number, and any
+            lectures you added, and signs you out everywhere. It cannot be undone.
           </p>
           <p class="auth__alert" id="delete-alert" role="alert" hidden></p>
           <div class="field field--password">
@@ -517,6 +546,64 @@
           </div>
           <button class="button button--block button--danger" type="submit">Delete my account</button>
         </form>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Adding a lecture of your own -->
+  <dialog class="sheet sheet--adder" id="adder" aria-labelledby="adder-title">
+    <form method="dialog" class="sheet__bar">
+      <button class="sheet__close" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </form>
+    <div class="adder">
+      <svg class="adder__mark" viewBox="0 0 48 48" aria-hidden="true">
+        <rect x="6" y="10" width="36" height="26" rx="5" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <path d="M20.5 17.5v11l9-5.5z" fill="currentColor"/>
+        <path d="M16 41h16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+      <h2 class="adder__title" id="adder-title">Add a lecture</h2>
+      <p class="adder__lead" id="adder-lead"></p>
+
+      <form class="adder__form" id="adder-form" data-adder="choose" novalidate>
+        <div class="adder__file">
+          <div class="adder__file-words">
+            <p class="adder__file-name" id="adder-file-name"></p>
+            <p class="adder__file-meta" id="adder-file-meta"></p>
+          </div>
+          <button class="link" id="adder-other" type="button">Choose another</button>
+        </div>
+        <div class="field">
+          <input class="field__input" id="adder-name" name="title" type="text" placeholder=" " maxlength="120"
+                 autocomplete="off" aria-describedby="adder-name-error">
+          <label class="field__label" for="adder-name">Title</label>
+          <p class="field__error" id="adder-name-error" hidden></p>
+        </div>
+        <p class="auth__alert" id="adder-alert" role="alert" hidden></p>
+        <ul class="adder__facts" id="adder-facts"></ul>
+        <button class="button button--block" id="adder-start" type="submit">Add lecture</button>
+      </form>
+
+      <div class="adder__work" data-adder="progress" hidden>
+        <ol class="steps" id="adder-steps">
+          <li class="steps__item" data-step="frames"><span class="steps__mark" aria-hidden="true"></span><span class="steps__label">Finding the slides</span><span class="steps__detail"></span></li>
+          <li class="steps__item" data-step="slides"><span class="steps__mark" aria-hidden="true"></span><span class="steps__label">Sending the slides</span><span class="steps__detail"></span></li>
+          <li class="steps__item" data-step="model"><span class="steps__mark" aria-hidden="true"></span><span class="steps__label">Getting the speech model</span><span class="steps__detail"></span></li>
+          <li class="steps__item" data-step="speech"><span class="steps__mark" aria-hidden="true"></span><span class="steps__label">Listening</span><span class="steps__detail"></span></li>
+          <li class="steps__item" data-step="building"><span class="steps__mark" aria-hidden="true"></span><span class="steps__label">Building your search</span><span class="steps__detail"></span></li>
+        </ol>
+        <progress class="meter" id="adder-meter" max="1" value="0" aria-label="Progress of the current step"></progress>
+        <p class="adder__note" id="adder-note">Keep this page open. You can close this and search while it works.</p>
+        <button class="button button--secondary button--block" id="adder-stop" type="button">Stop</button>
+      </div>
+
+      <div class="adder__work" data-adder="done" hidden>
+        <button class="button button--block" id="adder-search" type="button">Search it</button>
+      </div>
+
+      <div class="adder__work" data-adder="cannot" hidden>
+        <p class="auth__alert" id="adder-cannot" role="alert"></p>
       </div>
     </div>
   </dialog>

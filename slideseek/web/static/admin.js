@@ -100,6 +100,15 @@
     return account.sessions === 1 ? "Signed in on 1 device" : `Signed in on ${account.sessions} devices`;
   }
 
+  /* How many lectures of their own the account has added, and the space they take; never
+   * what they are. Empty where the server takes no such lectures, or there are none. */
+  function libraryText(account) {
+    const held = account.library;
+    if (!held || !held.lectures) return "";
+    const mb = Math.max(1, Math.round(held.bytes / 1_000_000));
+    return `${plural(held.lectures, "lecture")} of their own, ${mb.toLocaleString()} MB`;
+  }
+
   function tags(account) {
     const list = [];
     if (account.default) list.push(["Default admin", "default"]);
@@ -151,7 +160,7 @@
     item.dataset.id = String(account.id);
     const row = element("button", "roster__row");
     row.type = "button";
-    const described = [account.name, `@${account.username}`, account.email, ...tags(account).map(([label]) => label), signedInText(account)];
+    const described = [account.name, `@${account.username}`, account.email, libraryText(account), ...tags(account).map(([label]) => label), signedInText(account)];
     row.setAttribute("aria-label", described.filter(Boolean).join(", "));
     row.addEventListener("click", () => openEditor(account.id));
 
@@ -159,7 +168,7 @@
     avatar.setAttribute("aria-hidden", "true");
     const text = element("span", "roster__text");
     text.append(element("span", "roster__name", account.name));
-    text.append(element("span", "roster__meta", `@${account.username} · ${account.email}`));
+    text.append(element("span", "roster__meta", [`@${account.username}`, account.email, libraryText(account)].filter(Boolean).join(" · ")));
     const side = element("span", "roster__side");
     const labels = element("ul", "tags");
     renderTags(labels, account);

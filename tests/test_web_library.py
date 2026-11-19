@@ -297,3 +297,43 @@ def test_a_library_made_from_a_directory_shares_the_searchers_models(tmp_path):
         assert models.image_embedder is searcher.image_embedder
     finally:
         library.close()
+
+
+def test_the_page_is_told_whether_it_may_offer_adding_a_lecture(site, tmp_path):
+    app, _, _ = site
+    assert visitor(app).get("/api/info").json()["own_lectures"] is True
+    index = make_index()
+    searcher = Searcher(index, text_embedder=FakeTextEmbedder(), image_embedder=FakeImageEmbedder())
+    plain = create_app(index, searcher, warm_up=False, accounts=fast_accounts())
+    assert visitor(plain).get("/api/info").json()["own_lectures"] is False
+
+
+def test_the_page_may_play_a_file_from_this_computer_but_compiles_no_webassembly(site):
+    from slideseek.web.server import CONTENT_SECURITY_POLICY
+
+    app, _, _ = site
+    page = visitor(app).get("/")
+    assert "media-src 'self' blob:" in page.headers["content-security-policy"]
+    assert "wasm-unsafe-eval" not in CONTENT_SECURITY_POLICY
+    # The page and its scripts change together: a browser checks each is current.
+    for path in ("/", "/app.js", "/styles.css", "/capture/adder.js", "/capture/speech-worker.js"):
+        assert visitor(app).get(path).headers["cache-control"] == "no-cache", path
+
+
+def test_the_page_offers_your_lectures_with_everything_its_script_needs():
+    from slideseek.web.server import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for hook in (
+        'id="yours"',
+        'id="adder"',
+        'id="scope"',
+        'data-scope="mine"',
+        'id="recording-input"',
+    ):
+        assert hook in html, hook
+    adder = (STATIC_DIR / "capture" / "adder.js").read_text(encoding="utf-8")
+    worker = (STATIC_DIR / "capture" / "speech-worker.js").read_text(encoding="utf-8")
+    # The pinned model, kept in the site's private files rather than the Cache API.
+    assert "b3f77bf9a8c4d5ea3415827033d1ffea7955fd9a" in adder
+    assert "env.useCustomCache = true" in worker and "getDirectory" in worker

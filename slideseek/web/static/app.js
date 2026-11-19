@@ -8,6 +8,10 @@
  * Searching needs an account, so the two search endpoints answer 401 until the visitor
  * signs in; see "accounts" below. Text from the server is only ever inserted as text
  * nodes, never as HTML.
+ *
+ * Where the server takes them, people can add lectures of their own; see "your own
+ * lectures" below. The work of reading a recording is in /capture/adder.js, loaded only
+ * when it is needed.
  */
 (() => {
   "use strict";
@@ -38,6 +42,9 @@
   const accountButton = $("account-button");
   const gate = $("gate");
   const toast = $("toast");
+  const scopeControl = $("scope");
+  const adder = $("adder");
+  const recordingInput = $("recording-input");
 
   const BADGES = {
     said: { label: "Said", kind: "said" },
@@ -53,6 +60,10 @@
   let inFlight = null;
   let picture = null; // { file, url } while a picture is the query
   let account = null; // the signed-in visitor, as /api/account describes them
+  let ownLectures = []; // the visitor's own lectures, as /api/library lists them
+  let scope = "all"; // which lectures a search covers: all, mine or public
+  let adding = null; // the lecture being added from this page: { id, title, controller, summary }
+  let choice = null; // the recording chosen in the sheet, not yet started: { file, handle, duration }
 
   /* ------------------------------------------------------------ helpers */
 
@@ -121,6 +132,11 @@
     return `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;
   }
 
+  function megabytes(bytes) {
+    const mb = bytes / 1_000_000;
+    return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
+  }
+
   /* Write `text` into `node`, wrapping the given character spans in highlights. */
   function highlight(node, text, spans) {
     node.textContent = "";
@@ -150,7 +166,7 @@
       option.value = lecture.lecture_id;
       lectureSelect.append(option);
     }
-    if (info.lectures.length < 2) lectureSelect.closest(".select").hidden = true;
+    lectureSelect.closest(".select").hidden = lectureSelect.options.length < 3;
   }
 
   function renderExamples() {
@@ -337,7 +353,10 @@
     empty.hidden = data.results.length > 0;
     for (const result of data.results) grid.append(renderResult(result));
 
-    const where = lectureSelect.value ? ` in ${lectureSelect.selectedOptions[0].textContent}` : "";
+    let where = "";
+    if (lectureSelect.value) where = ` in ${lectureSelect.selectedOptions[0].textContent}`;
+    else if (scope === "mine") where = " in your lectures";
+    else if (scope === "public") where = ` in the ${publicLabel()} lectures`;
     const reranked = data.reranked ? ` · reranked in ${(data.rerank_ms / 1000).toFixed(1)} s` : "";
     const took = data.took_ms >= 1000 ? `${(data.took_ms / 1000).toFixed(1)} s` : `${Math.round(data.took_ms)} ms`;
     status.textContent = `${plural(data.count, "moment")}${where} · ${took}${reranked}`;
@@ -385,7 +404,7 @@
     status.textContent = `${firstStage} · reranking on a GPU`;
     try {
       const client = await connectGradio();
-      const reply = await client.predict("/rerank", { query, k: count, lectures: lecture ? [lecture] : null });
+      const reply = await client.predict("/rerank", { query, k: count, lectures: lecture ? [lecture] : null, scope });
       if (signal.aborted) return;
       renderResults(reply.data[0]);
     } catch (error) {
@@ -410,6 +429,7 @@
     const lecture = lectureSelect.value;
     const params = new URLSearchParams({ q: query });
     if (lecture) params.set("lecture", lecture);
+    if (scope !== "all") params.set("scope", scope);
     if (push) history.pushState({ query, lecture }, "", `?${params}`);
 
     resultsSection.hidden = false;
@@ -494,6 +514,7 @@
     const lecture = lectureSelect.value;
     const params = new URLSearchParams({ k: "6" });
     if (lecture) params.set("lecture", lecture);
+    if (scope !== "all") params.set("scope", scope);
 
     resultsTitle.textContent = "Your picture";
     status.textContent = info && !info.ready ? "Warming up the models. The first search takes a few seconds." : "Looking at your picture";
@@ -579,12 +600,23 @@
     form.classList.remove("is-dropping");
     if (accountDialog.open) return;
     const file = imageFrom(event.dataTransfer.files);
-    if (file) searchPicture(file);
-    else {
-      resultsSection.hidden = false;
-      resultsTitle.textContent = "Your picture";
-      status.textContent = "That file is not a picture.";
+    if (file) {
+      searchPicture(file);
+      return;
     }
+    // A recording is a lecture to add. The drop must be read now: it is gone after a wait.
+    const files = [...event.dataTransfer.files];
+    const recording = info && info.own_lectures ? files.find(isRecording) : null;
+    if (recording) {
+      const items = [...(event.dataTransfer.items || [])].filter((item) => item.kind === "file");
+      const single = files.length === 1 && items.length === 1 && typeof items[0].getAsFileSystemHandle === "function";
+      const handle = single ? items[0].getAsFileSystemHandle().catch(() => null) : Promise.resolve(null);
+      handle.then((found) => openAdder({ file: recording, handle: found && found.kind === "file" ? found : null }));
+      return;
+    }
+    resultsSection.hidden = false;
+    resultsTitle.textContent = "Your picture";
+    status.textContent = info && info.own_lectures ? "That file is not a picture or a recording." : "That file is not a picture.";
   });
 
   $("picture-example").addEventListener("click", async () => {
@@ -669,6 +701,8 @@
     accountButton.classList.toggle("is-signed-in", Boolean(account));
     gate.hidden = Boolean(account);
     form.classList.toggle("is-locked", !account);
+    if (!account && adding) adding.controller.abort();
+    if (info) loadYours();
   }
 
   /* Run `action` now if somebody is signed in; otherwise ask them to sign in first. */
@@ -718,6 +752,7 @@
     $("profile-email").textContent = account.email;
     $("profile-phone").textContent = account.phone;
     $("admin-link").hidden = !account.admin;
+    $("yours-link").hidden = !(info && info.own_lectures);
     $("delete-form").hidden = true;
     $("delete-start").setAttribute("aria-expanded", "false");
     $("delete-password").value = "";
@@ -1050,7 +1085,9 @@
   function openPlayer(result) {
     playerFrame.textContent = "";
     const source = result.player;
-    if (source.kind === "youtube") {
+    if (source.kind === "own") {
+      playOwn(result);
+    } else if (source.kind === "youtube") {
       const frame = element("iframe");
       const start = encodeURIComponent(source.start);
       frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(source.video_id)}?start=${start}&autoplay=1&rel=0`;
@@ -1077,10 +1114,579 @@
   // Emptying the frame is what stops the video.
   player.addEventListener("close", () => {
     playerFrame.textContent = "";
+    if (playerFrame.dataset.url) URL.revokeObjectURL(playerFrame.dataset.url);
+    delete playerFrame.dataset.url;
   });
   player.addEventListener("click", (event) => {
     if (event.target === player) player.close();
   });
+
+  /* ------------------------------------------------------------ your own lectures
+   *
+   * A recording is read in this browser and never uploaded: /capture/adder.js samples its
+   * frames, grabs its slides and listens to it, and sends those to /api/library, where the
+   * server finishes it with the indexer's own code. A result from one of your own lectures
+   * plays from the file on your computer.
+   */
+  const BROWSER_STAGES = ["frames", "stills", "speech"];
+  const STAGE_TEXT = {
+    frames: "Not finished: its slides are still to be found",
+    stills: "Not finished: its slides are still to be sent",
+    speech: "Not finished: it is still to be listened to",
+    building: "Building its search",
+    ready: "Ready",
+    failed: "Could not be finished",
+  };
+  let captureModule = null;
+
+  function capture() {
+    if (!captureModule) {
+      captureModule = import("/capture/adder.js").catch((error) => {
+        captureModule = null;
+        throw error;
+      });
+    }
+    return captureModule;
+  }
+
+  function isRecording(file) {
+    const name = (file.name || "").toLowerCase();
+    return (file.type || "").startsWith("video/") || /\.(mp4|m4v|mov|webm|mkv)$/.test(name);
+  }
+
+  /* What the public lectures are called on the scope switch: "MIT", if they all say so. */
+  function publicLabel() {
+    const firsts = new Set(((info && info.lectures) || []).map((l) => (l.course || "").split(/\s+/)[0]).filter(Boolean));
+    return firsts.size === 1 ? [...firsts][0] : "Public";
+  }
+
+  async function loadYours() {
+    if (info && info.own_lectures && account) {
+      try {
+        ownLectures = (await getJSON("/api/library")).lectures;
+      } catch (error) {
+        ownLectures = [];
+      }
+    } else {
+      ownLectures = [];
+    }
+    renderYours();
+  }
+
+  function renderYours() {
+    const enabled = Boolean(info && info.own_lectures);
+    $("yours").hidden = !enabled;
+    $("nav-yours").hidden = !enabled;
+    if (!enabled) return;
+    const list = $("yours-list");
+    list.textContent = "";
+    for (const lecture of ownLectures) list.append(yourRow(lecture));
+    $("yours-note").textContent = account
+      ? "Or drop a recording anywhere on this page."
+      : "Sign in first: your lectures are kept for your account alone.";
+
+    const ready = ownLectures.filter((lecture) => lecture.stage === "ready");
+    scopeControl.hidden = !ready.length;
+    if (!ready.length && scope !== "all") setScope("all");
+    let group = lectureSelect.querySelector("optgroup");
+    const current = lectureSelect.value;
+    if (group) group.remove();
+    if (ready.length) {
+      group = element("optgroup");
+      group.label = "Your lectures";
+      for (const lecture of ready) {
+        const option = element("option", "", lecture.title);
+        option.value = lecture.lecture_id;
+        group.append(option);
+      }
+      lectureSelect.append(group);
+    }
+    lectureSelect.value = [...lectureSelect.options].some((o) => o.value === current) ? current : "";
+    lectureSelect.closest(".select").hidden = lectureSelect.options.length < 3;
+  }
+
+  function yourFacts(lecture) {
+    const facts = [duration(lecture.duration_s)];
+    if (adding && adding.id === lecture.lecture_id) facts.push(adding.summary);
+    else if (lecture.stage === "ready") facts.push(plural(lecture.n_moments, "moment"), plural(lecture.n_slides, "slide"));
+    else facts.push(STAGE_TEXT[lecture.stage] || lecture.stage);
+    return facts.join(" · ");
+  }
+
+  function actionLink(label, onClick, className = "link") {
+    const button = element("button", className, label);
+    button.type = "button";
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function yourRow(lecture) {
+    const row = element("li", "lecture lecture--own");
+    row.dataset.lecture = lecture.lecture_id;
+    const words = element("div", "lecture__words");
+    words.append(element("h3", "lecture__title", lecture.title));
+    words.append(element("p", "lecture__meta", yourFacts(lecture)));
+    if (lecture.stage === "failed" && lecture.error) words.append(element("p", "lecture__error", lecture.error));
+
+    const actions = element("div", "lecture__actions");
+    const here = adding && adding.id === lecture.lecture_id;
+    if (lecture.stage === "ready") {
+      const only = actionLink("Search this lecture", () => {
+        lectureSelect.value = lecture.lecture_id;
+        setScope("all");
+        input.focus();
+        form.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (input.value.trim()) search(input.value, { push: true });
+      });
+      only.append(chevron());
+      actions.append(only);
+    } else if (here) {
+      actions.append(actionLink("Show progress", () => adder.open || adder.showModal()));
+    } else if (BROWSER_STAGES.includes(lecture.stage)) {
+      actions.append(actionLink("Carry on", () => carryOn(lecture)));
+    }
+    actions.append(actionLink("Rename", () => startRename(row, lecture), "link link--quiet"));
+    actions.append(actionLink("Delete", () => confirmDelete(row, lecture), "link link--quiet"));
+    row.append(words, actions);
+    return row;
+  }
+
+  function startRename(row, lecture) {
+    const words = row.querySelector(".lecture__words");
+    const formNode = element("form", "rename");
+    const field = element("input", "rename__input");
+    field.value = lecture.title;
+    field.maxLength = 120;
+    field.setAttribute("aria-label", "Title");
+    const save = element("button", "link", "Save");
+    save.type = "submit";
+    formNode.append(field, save, actionLink("Cancel", renderYours, "link link--quiet"));
+    words.replaceChildren(formNode);
+    field.focus();
+    field.select();
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") renderYours();
+    });
+    formNode.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const title = field.value.trim();
+      if (!title || title === lecture.title) {
+        renderYours();
+        return;
+      }
+      const reply = await sendJSON("PATCH", `/api/library/lectures/${encodeURIComponent(lecture.lecture_id)}`, { title }).catch(() => null);
+      if (!reply || !reply.ok) {
+        announce((reply && reply.data.detail) || "The lecture could not be renamed.");
+        return;
+      }
+      if (adding && adding.id === lecture.lecture_id) adding.title = title;
+      await loadYours();
+      announce("Renamed.");
+    });
+  }
+
+  function confirmDelete(row, lecture) {
+    const actions = row.querySelector(".lecture__actions");
+    const question = element("span", "lecture__confirm", `Delete “${lecture.title}”? This can’t be undone.`);
+    const yes = actionLink("Delete", async () => {
+      if (adding && adding.id === lecture.lecture_id) adding.controller.abort();
+      try {
+        const module = await capture();
+        await module.library.remove(lecture.lecture_id);
+      } catch (error) {
+        announce(error.message || "The lecture could not be deleted.");
+        return;
+      }
+      if (lectureSelect.value === lecture.lecture_id) lectureSelect.value = "";
+      await loadYours();
+      announce(`Deleted “${lecture.title}”.`);
+    }, "link link--danger");
+    actions.replaceChildren(question, yes, actionLink("Cancel", renderYours, "link link--quiet"));
+    yes.focus();
+  }
+
+  /* -- the scope switch: all, yours, or the public ones */
+
+  function setScope(next) {
+    scope = next;
+    for (const option of scopeControl.querySelectorAll("[data-scope]")) {
+      const on = option.dataset.scope === next;
+      option.setAttribute("aria-checked", String(on));
+      option.tabIndex = on ? 0 : -1;
+    }
+  }
+
+  function scopeChanged() {
+    if (scope !== "all") lectureSelect.value = "";
+    if (picture) searchPicture(picture.file, { scroll: false });
+    else if (input.value.trim()) search(input.value, { push: true });
+  }
+
+  scopeControl.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-scope]");
+    if (!option || option.dataset.scope === scope) return;
+    setScope(option.dataset.scope);
+    scopeChanged();
+  });
+  scopeControl.addEventListener("keydown", (event) => {
+    const options = [...scopeControl.querySelectorAll("[data-scope]")];
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const next = options[(options.findIndex((o) => o.dataset.scope === scope) + step + options.length) % options.length];
+    setScope(next.dataset.scope);
+    next.focus();
+    scopeChanged();
+  });
+
+  /* -- the sheet that adds a lecture */
+
+  const STEPS = ["frames", "slides", "model", "speech", "building"];
+  const stepNode = (name) => adder.querySelector(`[data-step="${name}"]`);
+  const meter = $("adder-meter");
+
+  function showAdderView(view) {
+    for (const node of adder.querySelectorAll("[data-adder]")) node.hidden = node.dataset.adder !== view;
+  }
+
+  function showCannot(message) {
+    $("adder-title").textContent = "Add a lecture";
+    $("adder-lead").textContent = "";
+    $("adder-cannot").textContent = message;
+    showAdderView("cannot");
+    if (!adder.open) adder.showModal();
+  }
+
+  function setStep(name, state, detail = "") {
+    const node = stepNode(name);
+    node.classList.toggle("is-active", state === "active");
+    node.classList.toggle("is-done", state === "done");
+    node.querySelector(".steps__detail").textContent = detail;
+    if (state === "active") node.setAttribute("aria-current", "step");
+    else node.removeAttribute("aria-current");
+  }
+
+  function finishSteps(upTo) {
+    for (const name of STEPS.slice(0, STEPS.indexOf(upTo))) {
+      if (!stepNode(name).classList.contains("is-done")) setStep(name, "done");
+    }
+  }
+
+  function setMeter(fraction) {
+    if (fraction === null || fraction === undefined || !Number.isFinite(fraction)) meter.removeAttribute("value");
+    else meter.value = Math.max(0, Math.min(1, fraction));
+  }
+
+  function minutesLeft(seconds) {
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    return minutes === 1 ? "about a minute left" : `about ${minutes} minutes left`;
+  }
+
+  function summarise(text) {
+    if (!adding) return;
+    adding.summary = text;
+    const row = $("yours-list").querySelector(`[data-lecture="${adding.id}"] .lecture__meta`);
+    if (row) {
+      const lecture = ownLectures.find((item) => item.lecture_id === adding.id);
+      if (lecture) row.textContent = yourFacts(lecture);
+    }
+  }
+
+  const downloads = new Map(); // speech model file -> { loaded, total }
+
+  function progressed(step, details) {
+    if (step === "made") {
+      adding.id = details.lecture_id;
+      loadYours();
+      return;
+    }
+    if (step === "frames") {
+      setStep("frames", "active", details.sending ? "Looking for the slide changes" : `${Math.round(100 * details.fraction)}%`);
+      setMeter(details.sending ? null : details.fraction);
+      summarise("Finding the slides");
+    } else if (step === "slides") {
+      finishSteps("slides");
+      setStep("slides", "active", `${details.sent} of ${details.total}`);
+      setMeter(details.total ? details.sent / details.total : null);
+      summarise("Sending the slides");
+    } else if (step === "sound") {
+      finishSteps("model");
+      setStep("speech", "active", "Reading the sound");
+      setMeter(null);
+      summarise("Listening");
+    } else if (step === "model") {
+      if (adding.cached) {
+        // Read from this computer, not downloaded: a moment's work, part of listening.
+        setStep("speech", "active", "Loading the speech model");
+        setMeter(null);
+        return;
+      }
+      downloads.set(details.file, { loaded: details.loaded || 0, total: details.total || 0 });
+      let loaded = 0;
+      let total = 0;
+      for (const item of downloads.values()) {
+        loaded += item.loaded;
+        total += item.total;
+      }
+      stepNode("model").hidden = false;
+      setStep("speech", "waiting"); // the sound is read; listening starts once the model is here
+      setStep("model", "active", total ? `${megabytes(loaded)} of ${megabytes(total)}` : "");
+      setMeter(total ? loaded / total : null);
+      summarise("Getting the speech model");
+    } else if (step === "speech") {
+      finishSteps("speech");
+      const fraction = details.count ? details.done / details.count : 0;
+      const left = details.left === null ? "" : ` · ${minutesLeft(details.left)}`;
+      setStep("speech", "active", `${Math.round(100 * fraction)}%${left}`);
+      setMeter(fraction);
+      summarise(`Listening, ${Math.round(100 * fraction)}%`);
+    } else if (step === "building") {
+      finishSteps("building");
+      setStep("building", "active", "Reading the slides and making them searchable");
+      setMeter(null);
+      summarise("Building its search");
+    } else if (step === "ready") {
+      finishSteps("building");
+      setStep("building", "done");
+      setMeter(1);
+    }
+  }
+
+  async function openAdder(found = null) {
+    if (!account) {
+      whenSignedIn(() => openAdder(found), "Sign in to add a lecture of your own.");
+      return;
+    }
+    if (adding) {
+      showAdderView("progress");
+      if (!adder.open) adder.showModal();
+      return;
+    }
+    let module;
+    try {
+      module = await capture();
+    } catch (error) {
+      announce("Adding a lecture could not start. Reload the page and try again.");
+      return;
+    }
+    const can = await module.support();
+    if (!can.ok) {
+      showCannot(can.reason);
+      return;
+    }
+    if (!found) found = await module.chooseRecording(recordingInput);
+    if (!found) return;
+    if (!isRecording(found.file)) {
+      showCannot("That file is not a recording this page can read.");
+      return;
+    }
+    // The recording of a lecture left unfinished: carry on with that one.
+    const unfinished = ownLectures.find(
+      (lecture) => BROWSER_STAGES.includes(lecture.stage) && module.sameFile(found.file, lecture.file)
+    );
+    if (unfinished) {
+      runAdding({ file: found.file, handle: found.handle, title: unfinished.title, lecture: unfinished.lecture_id });
+      return;
+    }
+    let length;
+    try {
+      length = await module.lengthOf(found.file);
+    } catch (error) {
+      showCannot(error.message || "This browser cannot play that file.");
+      return;
+    }
+    choice = { ...found, duration: length.duration };
+    $("adder-title").textContent = "Add a lecture";
+    $("adder-lead").textContent = "";
+    $("adder-file-name").textContent = found.file.name;
+    $("adder-file-meta").textContent = `${duration(length.duration)} · ${megabytes(found.file.size)}`;
+    $("adder-name").value = module.titleFrom(found.file.name);
+    $("adder-alert").hidden = true;
+    $("adder-name-error").hidden = true;
+    $("adder-name").removeAttribute("aria-invalid");
+
+    const cached = await module.speechModelCached();
+    // Measured on an M4: 4.4 times faster than real time, plus a minute for the slides.
+    const estimate = Math.round(length.duration / 4.4 / 60) + 1;
+    const facts = [
+      "It is read on this computer. The video is never uploaded.",
+      cached
+        ? `It takes about ${estimate} minutes on a recent computer. Keep this page open until it is done.`
+        : `The first time, your browser downloads a ${megabytes(module.SPEECH.downloadBytes)} speech model, once. Then it takes about ${estimate} minutes on a recent computer. Keep this page open until it is done.`,
+    ];
+    const list = $("adder-facts");
+    list.textContent = "";
+    for (const fact of facts) list.append(element("li", "", fact));
+    showAdderView("choose");
+    if (!adder.open) adder.showModal();
+    requestAnimationFrame(() => $("adder-name").focus());
+  }
+
+  async function runAdding({ file, handle = null, title, lecture = null }) {
+    const module = await capture();
+    adding = { id: lecture, title, controller: new AbortController(), summary: "Starting" };
+    downloads.clear();
+    for (const name of STEPS) setStep(name, "waiting");
+    adding.cached = await module.speechModelCached();
+    stepNode("model").hidden = adding.cached;
+    setMeter(0);
+    $("adder-title").textContent = title;
+    $("adder-lead").textContent = file.name;
+    showAdderView("progress");
+    if (!adder.open) adder.showModal();
+    if (lecture) loadYours();
+    try {
+      const done = await module.addLecture({
+        file,
+        handle,
+        title,
+        lecture,
+        owner: account.username,
+        signal: adding.controller.signal,
+        report: progressed,
+      });
+      adding = null;
+      module.rememberChoice(done.lecture_id, file, done.file, handle); // plays without asking again
+      $("adder-title").textContent = `“${done.title}” is ready.`;
+      $("adder-lead").textContent = `${plural(done.n_moments, "moment")} from ${plural(done.n_slides, "slide")}, searchable now.`;
+      showAdderView("done");
+      $("adder-search").onclick = () => {
+        adder.close();
+        lectureSelect.value = done.lecture_id;
+        setScope("all");
+        input.focus();
+        form.scrollIntoView({ behavior: "smooth", block: "center" });
+      };
+      await loadYours();
+      lectureSelect.value = done.lecture_id;
+      if (!adder.open) announce(`“${done.title}” is ready to search.`);
+    } catch (error) {
+      const stopped = error.name === "AbortError";
+      adding = null;
+      await loadYours();
+      if (stopped) {
+        if (adder.open) adder.close();
+        announce("Stopped. Carry on whenever you like, from Your lectures.");
+      } else {
+        $("adder-title").textContent = title;
+        showCannot(error.message || "Something went wrong. Carry on from Your lectures to try again.");
+      }
+    }
+  }
+
+  /* Carry on with a lecture that was left unfinished: same file, from where it stopped. */
+  async function carryOn(lecture) {
+    if (adding) {
+      openAdder();
+      return;
+    }
+    let module;
+    try {
+      module = await capture();
+    } catch (error) {
+      announce("Adding a lecture could not start. Reload the page and try again.");
+      return;
+    }
+    let file = await module.recordingOf(lecture.lecture_id, lecture.file);
+    let handle = null;
+    if (!file) {
+      const can = await module.support();
+      if (!can.ok) {
+        showCannot(can.reason);
+        return;
+      }
+      announce(`Choose “${lecture.file.name}”, the recording this lecture came from.`);
+      const found = await module.chooseRecording(recordingInput);
+      if (!found) return;
+      if (!module.sameFile(found.file, lecture.file)) {
+        announce(`That is not “${lecture.file.name}”. Choose the file this lecture was added from.`);
+        return;
+      }
+      ({ file, handle } = found);
+    }
+    runAdding({ file, handle, title: lecture.title, lecture: lecture.lecture_id });
+  }
+
+  $("adder-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = $("adder-name").value.trim().replace(/\s+/g, " ");
+    if (!title) {
+      $("adder-name-error").textContent = "Give the lecture a title.";
+      $("adder-name-error").hidden = false;
+      $("adder-name").setAttribute("aria-invalid", "true");
+      $("adder-name").focus();
+      return;
+    }
+    if (!choice) return;
+    const { file, handle } = choice;
+    choice = null;
+    runAdding({ file, handle, title });
+  });
+  $("adder-name").addEventListener("input", () => {
+    $("adder-name-error").hidden = true;
+    $("adder-name").removeAttribute("aria-invalid");
+  });
+  $("adder-other").addEventListener("click", () => openAdder());
+  $("adder-stop").addEventListener("click", () => adding && adding.controller.abort());
+  $("add-lecture").addEventListener("click", () => openAdder());
+  $("yours-link").addEventListener("click", () => accountDialog.close());
+  adder.addEventListener("close", () => {
+    if (adding) announce(`Still adding “${adding.title}”. It carries on while this page is open.`);
+  });
+  adder.addEventListener("click", (event) => {
+    if (event.target === adder) adder.close();
+  });
+  // Leaving while a lecture is being added would stop it; the browser asks first.
+  window.addEventListener("beforeunload", (event) => {
+    if (adding) event.preventDefault();
+  });
+
+  /* -- playing a result from one of your own lectures, from the file on this computer */
+
+  function playFile(file, start) {
+    const url = URL.createObjectURL(file);
+    const video = element("video");
+    video.src = url;
+    video.controls = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.addEventListener("loadedmetadata", () => {
+      video.currentTime = start;
+    }, { once: true });
+    playerFrame.replaceChildren(video);
+    playerFrame.dataset.url = url;
+  }
+
+  async function playOwn(result) {
+    const source = result.player;
+    const box = element("div", "pick");
+    playerFrame.replaceChildren(box);
+    let module;
+    try {
+      module = await capture();
+    } catch (error) {
+      box.append(element("p", "pick__text", "This page could not open the recording. Reload it and try again."));
+      return;
+    }
+    const file = await module.recordingOf(source.lecture_id, source.file);
+    if (file) {
+      playFile(file, source.start);
+      return;
+    }
+    const text = element("p", "pick__text", `Choose “${source.file.name}” on this computer to play it from ${result.timestamp}. It plays from your computer and is not uploaded.`);
+    const choose = element("button", "button", "Choose the recording");
+    choose.type = "button";
+    choose.addEventListener("click", async () => {
+      const found = await module.chooseRecording(recordingInput);
+      if (!found) return;
+      if (!module.rememberChoice(source.lecture_id, found.file, source.file, found.handle)) {
+        text.textContent = `That is not “${source.file.name}”. Choose the file this lecture was added from.`;
+        return;
+      }
+      playFile(found.file, source.start);
+    });
+    box.append(text, choose);
+  }
 
   /* ------------------------------------------------------------ page behaviour */
 
@@ -1095,6 +1701,7 @@
   });
 
   lectureSelect.addEventListener("change", () => {
+    if (lectureSelect.value) setScope("all");
     if (picture) searchPicture(picture.file, { scroll: false });
     else if (input.value.trim()) search(input.value, { push: true });
   });
@@ -1105,7 +1712,7 @@
 
   document.addEventListener("keydown", (event) => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
-    const sheetOpen = player.open || accountDialog.open;
+    const sheetOpen = player.open || accountDialog.open || adder.open;
     if (event.key === "/" && !typing && !event.metaKey && !event.ctrlKey && !sheetOpen) {
       event.preventDefault();
       input.focus();
@@ -1118,6 +1725,8 @@
     const query = params.get("q");
     const lecture = params.get("lecture") || "";
     lectureSelect.value = [...lectureSelect.options].some((o) => o.value === lecture) ? lecture : "";
+    const wanted = params.get("scope");
+    setScope(!scopeControl.hidden && ["mine", "public"].includes(wanted) ? wanted : "all");
     if (!account) {
       // Nothing is searched until the visitor signs in; a shared link keeps its question.
       if (query) input.value = query;
@@ -1203,6 +1812,8 @@
     renderExamples();
     renderLibrary();
     renderBenchmark();
+    $("scope-public").textContent = publicLabel();
+    await loadYours();
     restoreFromUrl({ fallback: true });
   }
 
