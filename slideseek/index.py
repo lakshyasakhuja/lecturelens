@@ -70,6 +70,9 @@ class Index:
     lectures: dict[str, Lecture]
     manifest: dict[str, Any] = field(default_factory=dict)
     root: Path | None = None
+    # Where a lecture's thumbnails are, when not under ``root``: an index combined from
+    # several (``combine``) keeps each lecture's own directory.
+    lecture_roots: dict[str, Path] = field(default_factory=dict)
 
     def __len__(self) -> int:
         return len(self.moments)
@@ -93,10 +96,70 @@ class Index:
     def thumb_path(self, row: int) -> Path | None:
         """Absolute path of a moment's thumbnail, if the index is on disk and has one."""
         relative = self.moments["thumb"].iat[row]
-        if self.root is None or not relative:
+        root = self.lecture_roots.get(self.moments["lecture_id"].iat[row], self.root)
+        if root is None or not relative:
             return None
-        path = self.root / relative
+        path = root / relative
         return path if path.is_file() else None
+
+    @classmethod
+    def combine(cls, *indexes: Index) -> Index:
+        """One index holding every moment of ``indexes``, in order. Nothing is written.
+
+        Image rows are shifted the way ``pipeline.assemble`` shifts them, so each moment
+        still points at its own keyframe. The indexes must be built with the same embedding
+        models, and no lecture may be in two of them. The manifest is the first index's,
+        with the counts and durations of all of them.
+        """
+        if not indexes:
+            raise ValueError("nothing to combine")
+        first = indexes[0]
+        models = first.manifest.get("models", {})
+        lectures: dict[str, Lecture] = {}
+        lecture_roots: dict[str, Path] = {}
+        frames, parts = [], {name: [] for name in (*TEXT_VECTORS, "image")}
+        offset = 0
+        for index in indexes:
+            theirs = index.manifest.get("models", {})
+            for model in ("text", "image"):
+                if theirs.get(model) != models.get(model):
+                    raise InvalidIndex(
+                        f"cannot combine indexes built with different {model} models: "
+                        f"{models.get(model)!r} and {theirs.get(model)!r}"
+                    )
+            clash = set(lectures) & set(index.lectures)
+            if clash:
+                raise InvalidIndex(f"lecture(s) in two indexes: {sorted(clash)}")
+            lectures.update(index.lectures)
+            for lecture_id in index.lectures:
+                root = index.lecture_roots.get(lecture_id, index.root)
+                if root is not None:
+                    lecture_roots[lecture_id] = root
+            frame = index.moments.copy()
+            frame["image_idx"] = frame["image_idx"] + offset
+            offset += len(index.image)
+            frames.append(frame)
+            for name in parts:
+                parts[name].append(index.vectors[name])
+        manifest = {
+            **first.manifest,
+            "n_moments": sum(len(index) for index in indexes),
+            "n_keyframes": offset,
+            "n_lectures": len(lectures),
+            "total_duration_s": round(
+                sum(float(index.manifest.get("total_duration_s", 0)) for index in indexes), 1
+            ),
+        }
+        combined = cls(
+            moments=pd.concat(frames, ignore_index=True),
+            vectors={name: np.concatenate(chunks) for name, chunks in parts.items()},
+            lectures=lectures,
+            manifest=manifest,
+            root=first.root,
+            lecture_roots=lecture_roots,
+        )
+        combined.validate()
+        return combined
 
     def validate(self) -> None:
         """Check that the pieces agree with each other. Raises ``InvalidIndex`` if not."""

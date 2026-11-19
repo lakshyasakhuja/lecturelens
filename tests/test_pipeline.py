@@ -190,3 +190,92 @@ def test_masks_file_is_applied_per_lecture(lecture_video, tmp_path):
 def test_build_with_no_lectures_is_an_error(tmp_path):
     with pytest.raises(ValueError, match="no lectures"):
         make_indexer(tmp_path).build({}, {}, tmp_path / "index")
+
+
+# ---- the stages without a video -------------------------------------------------------------
+
+
+def finish_from_pieces(work, lecture, frames, stills_from, words, config=None):
+    """Run the stage functions on pieces made elsewhere, as the server does for a browser."""
+    from PIL import Image
+
+    from slideseek import asr
+    from slideseek.moments import plan_windows
+    from slideseek.pipeline import (
+        embed_moments,
+        find_slides,
+        keyframe_times,
+        load_segments,
+        moments_table,
+        read_slides,
+        slide_texts,
+        still_name,
+    )
+    from slideseek.utils import write_json
+
+    config = config or PipelineConfig()
+    work.mkdir(parents=True, exist_ok=True)
+    found = find_slides(
+        frames, config.slides, lecture_id=lecture.lecture_id, duration_s=float(len(frames))
+    )
+    write_json(work / "segments.json", found)
+    windows = plan_windows(load_segments(work / "segments.json"), config.moments)
+    times = keyframe_times(windows)
+    keyframes = work / "keyframes"
+    keyframes.mkdir(exist_ok=True)
+    stills = {}
+    for t in times:
+        stills[t] = keyframes / still_name(t)
+        if stills_from is None:
+            Image.new("RGB", (64, 36), "white").save(stills[t])
+        else:
+            shutil.copy(stills_from / still_name(t), stills[t])
+    texts = slide_texts(read_slides(FakeOcr(), stills), times)
+    frame = moments_table(lecture, windows, [asr.Word(*w) for w in words], texts)
+    frame.to_parquet(work / "moments.parquet", index=False)
+    vectors = embed_moments(
+        frame, [stills[t] for t in times], FakeIndexTextEmbedder(), FakeIndexImageEmbedder()
+    )
+    np.savez(work / "vectors.npz", **vectors)
+    return frame
+
+
+def test_a_lecture_can_be_finished_from_pieces_made_elsewhere(lecture_frames, tmp_path):
+    import synthetic
+
+    from slideseek.pipeline import assemble
+
+    frames, cuts = lecture_frames
+    words = [("hello", 1.0, 1.5), ("there", 21.0, 21.4), ("again", 70.0, 70.5)]
+    work = tmp_path / "work" / "own-1"
+    finish_from_pieces(work, LECTURE, synthetic.to_uint8(frames), None, words)
+
+    index = assemble({"lec_test": LECTURE}, {"lec_test": work}, tmp_path / "index", PipelineConfig(),
+                     asr_model="whisper in a browser")  # fmt: skip
+    loaded = Index.load(tmp_path / "index")
+    assert loaded.moments["t_start"].tolist() == [0.0, *map(float, cuts)]
+    assert loaded.moments["transcript"].tolist() == ["hello", "there", "", "again"]
+    assert loaded.manifest["models"]["asr"] == "whisper in a browser"
+    assert all(index.thumb_path(row) is not None for row in range(len(index)))
+
+
+@pytest.mark.ffmpeg
+def test_the_stages_give_what_the_indexer_gives(lecture_video, tmp_path):
+    from slideseek import asr, ingest
+
+    video, _, _ = lecture_video
+    indexer = make_indexer(tmp_path / "work")
+    indexer.build({"lec_test": LECTURE}, {"lec_test": video}, tmp_path / "index")
+    work = tmp_path / "work" / "lec_test"
+
+    # The same frames, stills and words, put through the functions one at a time.
+    frames = ingest.read_gray_frames(video, fps=1, size=(160, 90))
+    words = [(w.text, w.start, w.end, w.prob) for w in asr.iter_words(asr.load_segments(work / "asr.jsonl"))]  # fmt: skip
+    pieces = finish_from_pieces(tmp_path / "pieces", LECTURE, frames, work / "keyframes", words)
+
+    import pandas as pd
+
+    pd.testing.assert_frame_equal(pieces, pd.read_parquet(work / "moments.parquet"))
+    with np.load(work / "vectors.npz") as theirs, np.load(tmp_path / "pieces" / "vectors.npz") as ours:  # fmt: skip
+        for name in ("text", "speech", "slide", "image"):
+            assert np.array_equal(theirs[name], ours[name]), name

@@ -24,6 +24,12 @@ speech recognition, the slowest stage, is left alone.
 are read back from their work directories when the index is assembled.
 
 Models load lazily and once. If every lecture is cached, no model is loaded at all.
+
+**Stages without a video.** Each stage is also a plain function of its inputs
+(``find_slides``, ``read_slides``, ``moments_table``, ``embed_moments``, ``assemble``), so
+a lecture can be finished from pieces made somewhere else: a browser that sampled the
+frames, grabbed the stills and transcribed the speech sends those, and the server runs the
+rest (``slideseek.library``). The ``Indexer`` calls the same functions.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,7 +50,7 @@ from slideseek import asr, ingest, ocr
 from slideseek.catalog import Lecture
 from slideseek.embed import EmbedConfig, ImageEmbedder, TextEmbedder
 from slideseek.index import Index
-from slideseek.moments import MomentConfig, build_moments, moment_text, plan_windows
+from slideseek.moments import MomentConfig, Window, build_moments, moment_text, plan_windows
 from slideseek.slides import SlideConfig, SlideSegment, detect_slides, load_slide_config
 from slideseek.utils import format_timestamp, read_json, write_json
 
@@ -94,6 +100,159 @@ class StageCache:
 
 def _keyframe_ms(t: float) -> int:
     return round(t * 1000)
+
+
+# ---- the stages, as functions of their inputs ------------------------------------------------
+
+
+def still_name(t: float) -> str:
+    """The file name of the still taken at ``t`` seconds: milliseconds, nine digits."""
+    return f"{_keyframe_ms(t):09d}.jpg"
+
+
+def find_slides(
+    frames: np.ndarray, config: SlideConfig, *, lecture_id: str, duration_s: float
+) -> dict[str, Any]:
+    """Slide segments in greyscale frames, as ``segments.json`` stores them."""
+    detection = detect_slides(frames, config)
+    return {
+        "lecture_id": lecture_id,
+        "duration_s": duration_s,
+        "t_high": detection.t_high,
+        "t_low": detection.t_low,
+        "noise": detection.noise,
+        "merged": detection.merged,
+        "segments": [seg.to_dict() for seg in detection.segments],
+    }
+
+
+def load_segments(path: Path) -> list[SlideSegment]:
+    return [SlideSegment.from_dict(d) for d in read_json(path)["segments"]]
+
+
+def keyframe_times(windows: Sequence[Window]) -> list[float]:
+    """The times a still is needed at: every window's keyframe, once each, in order."""
+    return sorted({w.keyframe_t for w in windows})
+
+
+def read_slides(engine, stills: Mapping[float, Path]) -> dict[str, dict[str, Any]]:
+    """OCR of each still, keyed by its time in milliseconds, as ``ocr.json`` stores it."""
+    return {str(_keyframe_ms(t)): engine.read(path).to_dict() for t, path in stills.items()}
+
+
+def slide_texts(pages: Mapping[str, Any], times: Sequence[float]) -> dict[float, str]:
+    """``{keyframe time: the text on that slide}`` from ``read_slides``'s pages."""
+    return {t: ocr.SlideText.from_dict(pages[str(_keyframe_ms(t))]).text for t in times}
+
+
+def moments_table(
+    lecture: Lecture,
+    windows: Sequence[Window],
+    words: Sequence[asr.Word],
+    texts: Mapping[float, str],
+) -> pd.DataFrame:
+    """The lecture's moments as ``moments.parquet`` stores them, with image rows and thumbs."""
+    moments = build_moments(lecture, windows, words, texts)
+    frame = pd.DataFrame([m.to_dict() for m in moments])
+    position = {t: i for i, t in enumerate(keyframe_times(windows))}
+    frame["image_idx"] = [position[m.keyframe_t] for m in moments]
+    frame["thumb"] = [f"thumbs/{lecture.lecture_id}/{still_name(m.keyframe_t)}" for m in moments]
+    return frame
+
+
+def embed_moments(
+    frame: pd.DataFrame, keyframes: Sequence[Path], text_embedder, image_embedder
+) -> dict[str, np.ndarray]:
+    """The four embedding matrices for one lecture's moments, as ``vectors.npz`` stores them."""
+    slides = frame["slide_text"].tolist()
+    transcripts = frame["transcript"].tolist()
+    combined = [moment_text(s, t) for s, t in zip(slides, transcripts, strict=True)]
+    return {
+        "text": text_embedder.encode_documents(combined),
+        "speech": text_embedder.encode_documents(transcripts),
+        "slide": text_embedder.encode_documents([" ".join(s.split()) for s in slides]),
+        "image": image_embedder.encode_images(list(keyframes)),
+        "image_calibration": np.asarray(image_embedder.calibration, dtype=np.float64),
+    }
+
+
+def write_thumbnails(frame: pd.DataFrame, keyframe_dir: Path, thumb_dir: Path, width: int) -> None:
+    """One thumbnail per keyframe the moments use, ``width`` wide; stale ones are removed."""
+    from PIL import Image
+
+    thumb_dir.mkdir(parents=True, exist_ok=True)
+    wanted = {Path(relative).name for relative in frame["thumb"]}
+    for stale in thumb_dir.glob("*.jpg"):
+        if stale.name not in wanted:
+            stale.unlink()
+    for name in wanted:
+        target = thumb_dir / name
+        if not target.is_file():
+            with Image.open(keyframe_dir / name) as still:
+                still = still.convert("RGB")
+                height = round(still.height * width / still.width)
+                still.resize((width, height), Image.Resampling.LANCZOS).save(
+                    target, quality=85, optimize=True
+                )
+
+
+def assemble(
+    lectures: Mapping[str, Lecture],
+    work_dirs: Mapping[str, Path],
+    out_dir: str | Path,
+    config: PipelineConfig,
+    *,
+    asr_model: str | None = None,
+    timings: Mapping[str, Any] | None = None,
+) -> Index:
+    """Concatenate the lectures' work directories into one index, with thumbnails, and save it.
+
+    ``asr_model`` names the speech recogniser in the manifest when it was not the one the
+    config names (a browser's, say).
+    """
+    out_dir = Path(out_dir)
+    frames, parts = [], {"text": [], "speech": [], "slide": [], "image": []}
+    image_offset = 0
+    total_duration = 0.0
+    calibration = np.zeros(2)
+    for lecture_id in lectures:
+        work = Path(work_dirs[lecture_id])
+        frame = pd.read_parquet(work / "moments.parquet")
+        with np.load(work / "vectors.npz") as stored:
+            for name in parts:
+                parts[name].append(stored[name].astype(np.float32))
+            n_images = len(stored["image"])
+            calibration = stored["image_calibration"]
+        frame["image_idx"] = frame["image_idx"] + image_offset
+        image_offset += n_images
+        frames.append(frame)
+        total_duration += float(read_json(work / "segments.json")["duration_s"])
+        write_thumbnails(
+            frame, work / "keyframes", out_dir / "thumbs" / lecture_id, config.thumb_width
+        )
+
+    index = Index(
+        moments=pd.concat(frames, ignore_index=True),
+        vectors={name: np.concatenate(chunks) for name, chunks in parts.items()},
+        lectures=dict(lectures),
+        manifest={
+            "models": {
+                "text": config.embed.text_model,
+                "image": config.embed.image_model,
+                "asr": asr_model or config.asr.model,
+                "ocr": f"{config.ocr.version} ({config.ocr.detector} det, "
+                f"{config.ocr.language} rec)",
+            },
+            "query_instruction": config.embed.query_instruction,
+            "image_calibration": {"scale": float(calibration[0]), "bias": float(calibration[1])},
+            "jargon_boost": config.jargon_boost,
+            "moments": asdict(config.moments),
+            "total_duration_s": round(total_duration, 1),
+            "stage_seconds": dict(timings or {}),
+        },
+    )
+    index.save(out_dir)
+    return index
 
 
 class Indexer:
@@ -165,29 +324,20 @@ class Indexer:
         if not cache.fresh("segments", segments_key, segments_path):
             started = time.perf_counter()
             frames = ingest.read_gray_frames(video, fps=slide_cfg.fps, size=slide_cfg.size)
-            detection = detect_slides(frames, slide_cfg)
-            write_json(
-                segments_path,
-                {
-                    "lecture_id": lecture.lecture_id,
-                    "duration_s": info.duration_s,
-                    "t_high": detection.t_high,
-                    "t_low": detection.t_low,
-                    "noise": detection.noise,
-                    "merged": detection.merged,
-                    "segments": [seg.to_dict() for seg in detection.segments],
-                },
+            found = find_slides(
+                frames, slide_cfg, lecture_id=lecture.lecture_id, duration_s=info.duration_s
             )
+            write_json(segments_path, found)
             cache.done("segments", segments_key)
             timed("segments", started)
-        segments = [SlideSegment.from_dict(d) for d in read_json(segments_path)["segments"]]
+        segments = load_segments(segments_path)
         windows = plan_windows(segments, cfg.moments)
         log.info(
             "[%s] %d slide segments, %d moments", lecture.lecture_id, len(segments), len(windows)
         )
 
         # 2. Keyframe stills ---------------------------------------------------------------
-        keyframe_times = sorted({w.keyframe_t for w in windows})
+        times = keyframe_times(windows)
         keyframe_dir = work / "keyframes"
         keyframes_key = fingerprint(
             STAGE_VERSION["keyframes"], segments_key, asdict(cfg.moments), cfg.keyframe_max_width
@@ -199,34 +349,27 @@ class Indexer:
                     stale.unlink()
             ingest.extract_stills(
                 video,
-                keyframe_times,
+                times,
                 keyframe_dir,
                 max_width=cfg.keyframe_max_width,
                 duration_s=info.duration_s,
             )
             cache.done("keyframes", keyframes_key)
             timed("keyframes", started)
-        stills = {t: keyframe_dir / f"{_keyframe_ms(t):09d}.jpg" for t in keyframe_times}
+        stills = {t: keyframe_dir / still_name(t) for t in times}
 
         # 3. OCR -----------------------------------------------------------------------------
         ocr_path = work / "ocr.json"
         ocr_key = fingerprint(STAGE_VERSION["ocr"], keyframes_key, asdict(cfg.ocr))
         if not cache.fresh("ocr", ocr_key, ocr_path):
             started = time.perf_counter()
-            pages = {
-                str(_keyframe_ms(t)): self.ocr_engine.read(path).to_dict()
-                for t, path in stills.items()
-            }
-            write_json(ocr_path, pages)
+            write_json(ocr_path, read_slides(self.ocr_engine, stills))
             cache.done("ocr", ocr_key)
             timed("ocr", started)
-        pages = read_json(ocr_path)
-        slide_texts = {
-            t: ocr.SlideText.from_dict(pages[str(_keyframe_ms(t))]).text for t in keyframe_times
-        }
+        texts = slide_texts(read_json(ocr_path), times)
 
         # 4. Speech recognition ---------------------------------------------------------------
-        hotwords = asr.build_hotwords(slide_texts.values()) if cfg.jargon_boost else ""
+        hotwords = asr.build_hotwords(texts.values()) if cfg.jargon_boost else ""
         asr_path = work / "asr.jsonl"
         asr_key = fingerprint(STAGE_VERSION["asr"], video_key, asdict(cfg.asr), hotwords)
         if not cache.fresh("asr", asr_key, asr_path):
@@ -251,14 +394,7 @@ class Indexer:
         moments_path = work / "moments.parquet"
         moments_key = fingerprint(STAGE_VERSION["moments"], ocr_key, asr_key, lecture.to_dict())
         if not cache.fresh("moments", moments_key, moments_path):
-            moments = build_moments(lecture, windows, words, slide_texts)
-            frame = pd.DataFrame([m.to_dict() for m in moments])
-            position = {t: i for i, t in enumerate(keyframe_times)}
-            frame["image_idx"] = [position[m.keyframe_t] for m in moments]
-            frame["thumb"] = [
-                f"thumbs/{lecture.lecture_id}/{_keyframe_ms(m.keyframe_t):09d}.jpg" for m in moments
-            ]
-            frame.to_parquet(moments_path, index=False)
+            moments_table(lecture, windows, words, texts).to_parquet(moments_path, index=False)
             cache.done("moments", moments_key)
         frame = pd.read_parquet(moments_path)
 
@@ -267,7 +403,7 @@ class Indexer:
         vectors_key = fingerprint(STAGE_VERSION["vectors"], moments_key, asdict(cfg.embed))
         if not cache.fresh("vectors", vectors_key, vectors_path):
             started = time.perf_counter()
-            vectors = self._embed(frame, [stills[t] for t in keyframe_times])
+            vectors = self._embed(frame, [stills[t] for t in times])
             np.savez(vectors_path, **vectors)
             cache.done("vectors", vectors_key)
             timed("vectors", started)
@@ -281,17 +417,7 @@ class Indexer:
 
     def _embed(self, frame: pd.DataFrame, keyframes: list[Path]) -> dict[str, np.ndarray]:
         """The four embedding matrices for one lecture's moments."""
-        slide_texts = frame["slide_text"].tolist()
-        transcripts = frame["transcript"].tolist()
-        combined = [moment_text(s, t) for s, t in zip(slide_texts, transcripts, strict=True)]
-        text = self.text_embedder
-        return {
-            "text": text.encode_documents(combined),
-            "speech": text.encode_documents(transcripts),
-            "slide": text.encode_documents([" ".join(s.split()) for s in slide_texts]),
-            "image": self.image_embedder.encode_images(keyframes),
-            "image_calibration": np.asarray(self.image_embedder.calibration, dtype=np.float64),
-        }
+        return embed_moments(frame, keyframes, self.text_embedder, self.image_embedder)
 
     # ---- the whole library -------------------------------------------------------------
 
@@ -321,63 +447,5 @@ class Indexer:
 
     def assemble(self, lectures: Mapping[str, Lecture], out_dir: str | Path) -> Index:
         """Concatenate the per-lecture results into one index and write thumbnails."""
-        from PIL import Image
-
-        out_dir = Path(out_dir)
-        frames, parts = [], {"text": [], "speech": [], "slide": [], "image": []}
-        image_offset = 0
-        total_duration = 0.0
-        for lecture_id in lectures:
-            work = self.work_dir / lecture_id
-            frame = pd.read_parquet(work / "moments.parquet")
-            with np.load(work / "vectors.npz") as stored:
-                for name in parts:
-                    parts[name].append(stored[name].astype(np.float32))
-                n_images = len(stored["image"])
-                calibration = stored["image_calibration"]
-            frame["image_idx"] = frame["image_idx"] + image_offset
-            image_offset += n_images
-            frames.append(frame)
-            total_duration += float(read_json(work / "segments.json")["duration_s"])
-
-            thumb_dir = out_dir / "thumbs" / lecture_id
-            thumb_dir.mkdir(parents=True, exist_ok=True)
-            wanted = {Path(relative).name for relative in frame["thumb"]}
-            for stale in thumb_dir.glob("*.jpg"):
-                if stale.name not in wanted:
-                    stale.unlink()
-            for name in wanted:
-                target = thumb_dir / name
-                if not target.is_file():
-                    with Image.open(work / "keyframes" / name) as still:
-                        still = still.convert("RGB")
-                        height = round(still.height * self.config.thumb_width / still.width)
-                        still.resize(
-                            (self.config.thumb_width, height), Image.Resampling.LANCZOS
-                        ).save(target, quality=85, optimize=True)
-
-        cfg = self.config
-        index = Index(
-            moments=pd.concat(frames, ignore_index=True),
-            vectors={name: np.concatenate(chunks) for name, chunks in parts.items()},
-            lectures=dict(lectures),
-            manifest={
-                "models": {
-                    "text": cfg.embed.text_model,
-                    "image": cfg.embed.image_model,
-                    "asr": cfg.asr.model,
-                    "ocr": f"{cfg.ocr.version} ({cfg.ocr.detector} det, {cfg.ocr.language} rec)",
-                },
-                "query_instruction": cfg.embed.query_instruction,
-                "image_calibration": {
-                    "scale": float(calibration[0]),
-                    "bias": float(calibration[1]),
-                },
-                "jargon_boost": cfg.jargon_boost,
-                "moments": asdict(cfg.moments),
-                "total_duration_s": round(total_duration, 1),
-                "stage_seconds": self.timings,
-            },
-        )
-        index.save(out_dir)
-        return index
+        work_dirs = {lecture_id: self.work_dir / lecture_id for lecture_id in lectures}
+        return assemble(lectures, work_dirs, out_dir, self.config, timings=self.timings)
