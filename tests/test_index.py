@@ -71,9 +71,13 @@ def test_thumbnails_are_found_in_each_lectures_own_directory(tmp_path):
 def test_indexes_that_cannot_be_combined_are_refused():
     with pytest.raises(InvalidIndex, match="two indexes"):
         Index.combine(make_index(), make_index())
+    public = make_index()
+    public.manifest = {**public.manifest, "models": {"text": "one/model"}}
     other = renamed(make_index(), "own-")
     other.manifest = {**other.manifest, "models": {"text": "another/model"}}
     with pytest.raises(InvalidIndex, match="text models"):
-        Index.combine(make_index(), other)
+        Index.combine(public, other)
+    # An index that does not say which models built it is taken to match.
+    assert len(Index.combine(make_index(), other)) == 2 * len(public)
     with pytest.raises(ValueError):
         Index.combine()

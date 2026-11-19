@@ -107,8 +107,8 @@ class Index:
         """One index holding every moment of ``indexes``, in order. Nothing is written.
 
         Image rows are shifted the way ``pipeline.assemble`` shifts them, so each moment
-        still points at its own keyframe. The indexes must be built with the same embedding
-        models, and no lecture may be in two of them. The manifest is the first index's,
+        still points at its own keyframe. Indexes that name their embedding models must name
+        the same ones, and no lecture may be in two of them. The manifest is the first index's,
         with the counts and durations of all of them.
         """
         if not indexes:
@@ -122,7 +122,7 @@ class Index:
         for index in indexes:
             theirs = index.manifest.get("models", {})
             for model in ("text", "image"):
-                if theirs.get(model) != models.get(model):
+                if theirs.get(model) and models.get(model) and theirs[model] != models[model]:
                     raise InvalidIndex(
                         f"cannot combine indexes built with different {model} models: "
                         f"{models.get(model)!r} and {theirs.get(model)!r}"

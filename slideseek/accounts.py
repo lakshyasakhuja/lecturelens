@@ -427,9 +427,13 @@ class AccountStore:
 
     ``default_admin`` is the lower-cased username of the default admin, or ``None``; set it
     with ``set_default_admin``.
+
+    ``on_account_deleted``, if set, is called with each account after it has been deleted,
+    so that what it kept elsewhere (its own lectures: ``slideseek.library``) goes with it.
     """
 
     on_change: Callable[[str], None] | None = None
+    on_account_deleted: Callable[[Account], None] | None = None
     default_admin: str | None = None
 
     def __init__(
@@ -723,6 +727,11 @@ class AccountStore:
             db.execute(delete(users).where(users.c.id == account.id))
         self._forget(account.id)
         self._changed(ACCOUNT_DELETED)
+        if self.on_account_deleted is not None:
+            try:
+                self.on_account_deleted(account)
+            except Exception:  # the account is gone; what it kept elsewhere failed to go
+                log.exception("on_account_deleted failed for %s", account.username)
 
     def count(self) -> int:
         with self.engine.connect() as db:
