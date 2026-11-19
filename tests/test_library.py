@@ -237,7 +237,7 @@ def test_a_transcript_must_fit_the_lecture(tmp_path, monkeypatch):
     put = library.put_transcript
     refused(lambda: put(OWNER, lecture_id, {"words": []}), match="model, segments")
     refused(lambda: put(OWNER, lecture_id, words({"w": "late", "s": 200, "e": 201})), match="outside")  # fmt: skip
-    refused(lambda: put(OWNER, lecture_id, words({"w": "back", "s": 5, "e": 4})), match="outside")
+    refused(lambda: put(OWNER, lecture_id, words({"w": "back", "s": -1, "e": 4})), match="outside")
     refused(lambda: put(OWNER, lecture_id, words({"w": "nan", "s": float("nan"), "e": 1})), match="number")  # fmt: skip
     refused(lambda: put(OWNER, lecture_id, words({"w": "", "s": 1, "e": 2})), match="empty")
     refused(lambda: put(OWNER, lecture_id, words({"w": "x", "s": True, "e": 2})), match="number")
@@ -245,16 +245,21 @@ def test_a_transcript_must_fit_the_lecture(tmp_path, monkeypatch):
     many = [{"w": "word", "s": 1, "e": 1.1}] * 101
     refused(lambda: put(OWNER, lecture_id, words(*many)), match="more words")
 
-    # Words out of order are put in order; empty parts are dropped.
+    # Words out of order are put in order, and empty parts are dropped. Whisper's own
+    # slips are mended: a word whose times are the wrong way round has them swapped, and
+    # one that runs into the padding after the end (a few seconds, here) is moved to the end.
     put(OWNER, lecture_id, {"model": "m", "segments": [
-        {"words": [{"w": "second", "s": 3, "e": 4}, {"w": "first", "s": 1, "e": 2}]},
+        {"words": [{"w": "second", "s": 3, "e": 4}, {"w": "first", "s": 1, "e": 2},
+                   {"w": "third", "s": 5.9, "e": 5.1}, {"w": "last", "s": 110.5, "e": 110.6}]},
         {"words": []},
     ]})  # fmt: skip
     from slideseek.asr import load_segments
 
     (segment,) = load_segments(tmp_path / OWNER / lecture_id / "work" / "asr.jsonl")
-    assert [w.text for w in segment.words] == ["first", "second"]
-    assert segment.text == "first second"
+    assert [w.text for w in segment.words] == ["first", "second", "third", "last"]
+    assert (segment.words[2].start, segment.words[2].end) == (5.1, 5.9)
+    assert (segment.words[3].start, segment.words[3].end) == (107.0, 107.0)
+    assert segment.text == "first second third last"
 
 
 # ---- changing and removing ---------------------------------------------------------------------

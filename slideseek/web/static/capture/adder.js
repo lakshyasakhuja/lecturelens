@@ -126,10 +126,18 @@ export function titleFrom(name) {
 const DB_NAME = "slideseek";
 const STORE = "lectures";
 
+// Version 2 makes the store wherever it is missing, even in a database of that name made
+// without it.
+const DB_VERSION = 2;
+
 function openStore() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: "lecture_id" });
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE)) {
+        request.result.createObjectStore(STORE, { keyPath: "lecture_id" });
+      }
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -282,14 +290,25 @@ export async function addLecture({ file, handle = null, title, lecture, owner, r
     });
     id = made.lecture.lecture_id;
     report("made", { lecture_id: id });
+    // What was heard of this same recording for a lecture the server no longer has (it was
+    // restarted before the lecture was finished) is not heard again.
+    const meta = { name: file.name, size: file.size };
+    const earlier = (await remembered.all().catch(() => [])).find(
+      (record) =>
+        record.owner === owner &&
+        record.lecture_id !== id &&
+        sameFile(record.file, meta) &&
+        Object.keys(record.blocks || {}).length
+    );
     await remembered.put({
       lecture_id: id,
       owner,
       handle,
-      file: { name: file.name, size: file.size, lastModified: file.lastModified },
-      blocks: {},
-      count: 0,
+      file: { ...meta, lastModified: file.lastModified },
+      blocks: earlier ? earlier.blocks : {},
+      count: earlier ? earlier.count : 0,
     });
+    if (earlier) await remembered.forget(earlier.lecture_id).catch(() => {});
   } else if (handle) {
     await remembered.update(id, { handle, owner });
   }

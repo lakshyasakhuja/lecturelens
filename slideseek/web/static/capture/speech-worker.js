@@ -76,6 +76,7 @@ export const speechCache = {
       await partial.move(name);
     } catch (error) {
       this.failures += 1;
+      console.warn(`Slideseek could not keep the speech model's file ${key}:`, error);
       await folder.removeEntry(`${name}.partial`).catch(() => {});
       throw error;
     }
@@ -185,6 +186,11 @@ async function transcribe({ audio, blockSeconds = 300, padSeconds = 5, prompt = 
     }));
     const lo = owned[0] / SAMPLE_RATE;
     const hi = owned[1] / SAMPLE_RATE;
+    // Whisper's times can run past the end of the sound (its last window is padded to 30 s)
+    // and, now and then, a word ends before it starts: each word is kept inside the sound,
+    // the right way round.
+    const length = audio.length / SAMPLE_RATE;
+    const clamp = (t) => Math.round(Math.min(Math.max(t, 0), length) * 1000) / 1000;
     const words = mergeWordPieces(pieces)
       .filter((word) => {
         const mid = 0.5 * (word.s + word.e);
@@ -192,8 +198,8 @@ async function transcribe({ audio, blockSeconds = 300, padSeconds = 5, prompt = 
       })
       .map((word) => ({
         ...word,
-        s: Math.round(word.s * 1000) / 1000,
-        e: Math.round(word.e * 1000) / 1000,
+        s: clamp(Math.min(word.s, word.e)),
+        e: clamp(Math.max(word.s, word.e)),
       }));
     post({ type: "block", index, count, words, seconds: (performance.now() - blockStarted) / 1000 });
   }

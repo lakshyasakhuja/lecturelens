@@ -45,6 +45,7 @@ $ slideseek search --picture photo-of-the-projector.jpg
 | Web app: search page, player, JSON API, container image, Hugging Face Space | Built. `slideseek serve` runs it on any index. |
 | Accounts: sign up, sign in, sign out, delete; searching needs one | **Live** on the hosted demo. A Space's disk is wiped when it restarts, so a copy is kept in a private Hugging Face dataset ([how](deploy/README.md#on-a-space-a-copy-in-a-private-dataset)). On the live Space, a sign-up and a sign-in were copied to the dataset, and a restart brought them back. Squashing the dataset's history, which follows a deletion or an admin's change, has run on the Hub too: making the default admin left the dataset with one commit. |
 | Admins: see, change, create and delete accounts, at `/admin`; a protected default admin | **Live** on the hosted demo, whose default admin is `lakshyasakhuja` ([how](deploy/README.md#admins)). Tested with unit tests and in a browser locally; on the live Space, the admin column was added to the existing accounts at start-up, and the admin routes refuse anyone signed out or on another site. |
+| Adding your own lectures in the browser, kept privately for your account | Built and tested locally, **not deployed yet**. An 84-minute lecture added through the page searches like the Python pipeline's index of it: the same share of pictures found first for screenshots and crops, one picture fewer for phone photos, and the same first result for 17 of 20 questions ([measured](docs/browser-indexing.md#searching-a-lecture-added-in-the-browser)). |
 | Course for the public demo | Chosen and indexed locally: five lectures of MIT 6.7960 Deep Learning (Fall 2024), 6.5 hours, 678 moments. |
 | **Benchmark results on real lectures** | **Not yet.** The queries, slide transitions and transcript excerpts still have to be annotated by hand. No numbers are claimed until then. |
 | Hosted demo | **Live** at <https://lakshyasakhuja-slideseek.hf.space>, a free Hugging Face Space on ZeroGPU, put there by `slideseek deploy`. Searching with a question (about 0.15 s) and with a picture (about 5 s, most of it OCR, on the Space's shared CPU) both work there; reranking on a GPU is switched off there because it fails on ZeroGPU ([what was found](deploy/README.md#what-the-first-deployment-showed)). |
@@ -89,7 +90,9 @@ On an Apple M4 laptop with no GPU, once the models are downloaded, indexing the 
 
 ## Search your own lectures
 
-Put one video per lecture in a folder and index it. Everything stays on your machine: nothing is uploaded, and results link back to the local files.
+**In the browser.** On a Slideseek that takes them, sign in and choose **Add a lecture** under *Your lectures*, or drop a recording on the page. Your browser reads it on your computer: it samples small frames, grabs a picture of each slide and transcribes the speech with Whisper on your GPU (WebGPU: Chrome or Edge on a computer). Only those go to the server, which reads the slides and makes the lecture searchable beside the public ones. The video is never uploaded, and a result plays from your own file. Your lectures are kept for your account alone and deleted with it. The first time, the browser downloads a 566 MB speech model, once; after that an 84-minute lecture takes about 22 minutes on an Apple M4 ([measured](docs/browser-indexing.md)). How to offer it on a server is in [deploy/README.md](deploy/README.md#peoples-own-lectures).
+
+**On your own machine.** Put one video per lecture in a folder and index it. Everything stays on your machine: nothing is uploaded, and results link back to the local files.
 
 ```bash
 uv run slideseek index ~/lectures/comp5318 --out ~/lectures/comp5318-index --work ~/lectures/comp5318-work
@@ -118,6 +121,7 @@ This opens the search page at `http://127.0.0.1:7860`. Add `--videos <folder>` a
 - **Search with a picture** of a slide: the camera button (which opens the camera on a phone), pasting a screenshot anywhere on the page, or dropping a file on it. The picture is matched by how it looks (SigLIP 2's image tower against every keyframe) and by the words OCR reads off it (BM25 over slide text), fused like any other rankers. It is sent once, searched and forgotten.
 - **Results** are tiles: the best answer across the full width, the rest in a grid. Each shows its slide, the words that matched picked out of what was said, badges for the signals that matched, and the rank each signal gave it.
 - **Play** opens the lecture at that moment in a sheet, from YouTube's privacy-enhanced player or from a local file. The app hosts no video.
+- **Your lectures**, where the server has a library (`--library`): add a recording from your computer, watch each step (finding the slides, the speech model, listening with the time left, building the search), and carry on where it stopped if the page was closed. A switch then searches all lectures, only yours, or only the public ones, and your results play from your own file, picked again once per visit where the browser cannot keep a handle to it.
 - **The library, the pipeline and the benchmark** are described further down the page, with counts read from the index. The benchmark table appears only when a measured `metrics.json` exists; until then the page says so.
 
 It is a small FastAPI app with a hand-written frontend in plain HTML, CSS and JavaScript: no framework and no build step. The page is light throughout, with system type at large sizes, a translucent navigation bar and rounded tiles. It ships no fonts, loads scripts and styles from its own origin only, and runs under a strict Content-Security-Policy.
@@ -132,7 +136,8 @@ The same app runs as a free Hugging Face Space. The Space's app can also offer a
 | `slideseek info` | What an index contains and which models built it. |
 | `slideseek slides <video> --sheet out.jpg` | Run slide detection alone and write a contact sheet of keyframes, to check masks and thresholds before indexing. |
 | `slideseek push / pull <repo>` | Publish or fetch an index as a Hugging Face dataset, with an attribution card. |
-| `slideseek deploy <space> --index-repo <repo>` | Create or update the Hugging Face Space that serves a published index. |
+| `slideseek deploy <space> --index-repo <repo>` | Create or update the Hugging Face Space that serves a published index. `--libraries-repo` lets people add their own lectures there. |
+| `slideseek vendor` | Fetch the browser's speech-recognition scripts at pinned versions, checked by hash, for `serve --library`. |
 | `slideseek demo <dir>` | Generate the synthetic lectures. |
 
 ---
@@ -254,6 +259,7 @@ Measured on an Apple M4 laptop (10 cores, 16 GB, no discrete GPU) on the five MI
 | A query, end to end, on the CPU | 91 ms at the median, 113 ms at the 95th percentile (16 queries, both encoders included) |
 | The web app in a container | Ready 36 s after start; about 4 GB of memory |
 | Resuming an interrupted run | Four finished lectures were skipped in under a second; only the unfinished stage of the fifth ran again |
+| Adding an 84-minute lecture in the browser | About 22 minutes in Chromium on the M4: frames and stills in about a minute, speech at 4.4x real time on WebGPU, and a 566 MB model download the first time only. The server then builds its search in about 80 s ([details](docs/browser-indexing.md)) |
 
 ---
 

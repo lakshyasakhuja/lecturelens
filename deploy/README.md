@@ -22,6 +22,18 @@ Add `--videos videos` to play your own recordings in the page instead of linking
 Searching needs an account: sign up on the page the first time. Accounts are kept in
 `accounts.db` in the folder the server runs from, which git ignores; see [Accounts](#accounts).
 
+To let people add their own lectures from the page ([how it works](#peoples-own-lectures)),
+fetch the browser's speech-recognition scripts once and name a folder to keep the lectures
+in:
+
+```bash
+uv run slideseek vendor
+```
+
+```bash
+uv run slideseek serve --index index --library libraries
+```
+
 ## On Hugging Face Spaces, free
 
 Hugging Face lets a free personal account host up to two Spaces on **ZeroGPU**, shared
@@ -33,6 +45,10 @@ API and the search itself are exactly the ones `slideseek serve` runs.
 - **Searching** runs on the Space's CPU and costs a visitor nothing, once they have an
   account. A Space's disk does not last, so the accounts are kept with a copy in a private
   dataset: see [Accounts](#accounts).
+- **Adding your own lectures** is on when the Space is deployed with `--libraries-repo`
+  (step 7 below). The visitor's browser does the speech recognition, so the Space's CPU
+  only reads the slides and makes them searchable: see
+  [People's own lectures](#peoples-own-lectures).
 - **"Rerank on a GPU"** is built but switched off, because on ZeroGPU it does not work yet;
   [what was found](#what-the-first-deployment-showed) is below. With
   `SLIDESEEK_RERANK=1` the page shows a switch that rescores the fused top 20 with the
@@ -83,6 +99,19 @@ relying on it.
 6. Once the Space runs, sign up on it with the username you want to be the default admin,
    then deploy again with `--admin <username>` added to the command in step 4 ([why
    then](#admins)). The account is made an admin when the Space restarts.
+
+7. To let people add their own lectures, deploy with a second private dataset for them
+   ([why](#peoples-own-lectures)):
+
+   ```bash
+   uv run slideseek deploy <user>/slideseek --index-repo <user>/slideseek-index --accounts-repo <user>/slideseek-accounts --libraries-repo <user>/slideseek-libraries
+   ```
+
+   It fetches the browser's scripts (`slideseek vendor`), creates the dataset as private if
+   it does not exist, and uploads the scripts with the app. The Space writes to the dataset
+   with `SLIDESEEK_LIBRARIES_TOKEN` if that secret is set, and otherwise with the accounts'
+   token, so either add this dataset to the fine-grained token from step 3 or give it a
+   token of its own.
 
 The Space then builds for a few minutes, downloads the index and the accounts, loads the
 models and starts. Its *Logs* tab shows each step. Run step 4 again to update the Space
@@ -239,6 +268,48 @@ again. A Space reads the variable when it starts, and changing a variable restar
 
 The sign-up form tells visitors that the people who run Slideseek can see their details.
 
+## People's own lectures
+
+With a library (`serve --library`, `SLIDESEEK_LIBRARIES`, or `deploy --libraries-repo`),
+anyone signed in can add a recording from their own computer, search it beside the public
+lectures, and play results from their own file. The recording is never uploaded. The work
+is split where it is cheapest:
+
+| Where | What | Code |
+|---|---|---|
+| The visitor's browser | 1 fps 160x90 grey frames, a still of each slide, the sound at 16 kHz, and speech recognition with Whisper `large-v3-turbo` (4-bit) on WebGPU through transformers.js | `static/capture/` |
+| The server | Slide changes in the frames, OCR of the stills, moments and embeddings, with the indexer's own code and the searcher's models | `slideseek/library.py` |
+
+- **The browser needs WebGPU**: Chrome or Edge on a computer. The speech model, 566 MB, is
+  downloaded once from the Hugging Face Hub at a pinned revision and kept in the site's
+  private files in the browser. On an Apple M4, an 84-minute lecture takes about 22 minutes
+  ([measured](../docs/browser-indexing.md)), with the page open; closing it or a server
+  restart loses at most the five minutes being transcribed.
+- **What is sent**: the frames (about 14 MB compressed for 84 minutes), the stills (about
+  4 MB) and the transcript. The server keeps each lecture's own small index and
+  thumbnails, and deletes the full-size stills once it is built.
+- **Private**: only the account that added a lecture can list, search or see it. An admin
+  sees how many lectures each account has and how much space they take, never what they
+  are. Deleting the account deletes them.
+- **Limits** (`slideseek/library.py`): 20 lectures per account, 4 hours each, one being
+  added at a time per account and 12 across the site; a lecture left unfinished for two
+  days is removed.
+- **One worker** reads the slides and embeds them for the whole site, a few at a time,
+  under the same lock as searching, so a search waits a moment at most.
+
+On a Space the disk is wiped at every restart, so each finished lecture is copied to the
+private dataset `SLIDESEEK_LIBRARIES_REPO` (`slideseek/backup.py`, `LibraryBackup`): its
+state and its own index, uploaded when it is ready, and restored at start-up. Deleting a
+lecture or an account deletes its folder from the dataset, squashes the history, and deletes
+the large files nothing points at any more. The dataset is checked to be private before
+every upload, and `slideseek deploy` refuses a public one. A lecture still being added when
+the Space restarts is not in the copy. Adding the same recording again starts it afresh,
+but reuses what the browser had already transcribed, which it keeps until the server has it.
+
+This puts the slide text, transcripts and thumbnails of the lectures people add in a
+private repository on your Hugging Face account. Anyone who can sign in to that account, or
+who holds the token, can read them.
+
 ## With Docker
 
 ```bash
@@ -275,6 +346,9 @@ Both ways of running read the same environment variables.
 | `SLIDESEEK_ACCOUNTS_TOKEN` | unset | Token that can write to that dataset; a Space **secret**. `HF_TOKEN` is used if this is unset. |
 | `SLIDESEEK_ADMIN` | unset | Username of the default admin ([Admins](#admins)), an account that already exists. A variable, not a secret. |
 | `SLIDESEEK_DATABASE_URL` | `sqlite:///accounts.db` | Where accounts are kept ([Accounts](#other-places)). On a Space, a secret; without it, `/data` if the Space has persistent storage. |
+| `SLIDESEEK_LIBRARIES` | unset | Directory for the lectures people add themselves ([People's own lectures](#peoples-own-lectures)). Without it or the next, nobody can add any. |
+| `SLIDESEEK_LIBRARIES_REPO` | unset | Private dataset that keeps a copy of those lectures; turns them on, in `libraries` (or `/data` with persistent storage) unless `SLIDESEEK_LIBRARIES` names a directory. |
+| `SLIDESEEK_LIBRARIES_TOKEN` | unset | Token that can write to that dataset; a Space **secret**. The accounts' token is used if this is unset. |
 
 ## Why the frontend is not Gradio's
 

@@ -114,13 +114,12 @@ CONTENT_SECURITY_POLICY = "; ".join(
 # download on to storage under hf.co. A worker is governed by the policy it was served with,
 # so only the worker's scripts get this one; the page that starts the worker does not.
 SPEECH_PATHS = ("/capture/", "/vendor/browser/", "/lab/")
-SPEECH_CONTENT_SECURITY_POLICY = (
-    CONTENT_SECURITY_POLICY.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")
-    .replace(
-        "default-src 'self'",
-        "default-src 'self'; worker-src 'self'; "
-        "connect-src 'self' https://huggingface.co https://*.hf.co",
-    )
+SPEECH_CONTENT_SECURITY_POLICY = CONTENT_SECURITY_POLICY.replace(
+    "script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'"
+).replace(
+    "default-src 'self'",
+    "default-src 'self'; worker-src 'self'; "
+    "connect-src 'self' https://huggingface.co https://*.hf.co",
 )
 
 
@@ -749,8 +748,9 @@ def libraries_from_env(default: str | Path = "libraries"):
 
     ``SLIDESEEK_LIBRARIES`` names the directory; ``SLIDESEEK_LIBRARIES_REPO`` a private
     dataset to keep a copy in, restored into the directory now (with ``default`` as the
-    directory if none is named). Returns ``(directory, LibraryBackup)``, either of them
-    ``None``. Raises ``BackupError`` if there is a copy that cannot be restored.
+    directory if none is named), written with ``SLIDESEEK_LIBRARIES_TOKEN`` or else the
+    accounts' token. Returns ``(directory, LibraryBackup)``, either of them ``None``.
+    Raises ``BackupError`` if there is a copy that cannot be restored.
     """
     folder = os.environ.get("SLIDESEEK_LIBRARIES", "").strip()
     repo = os.environ.get("SLIDESEEK_LIBRARIES_REPO", "").strip()
@@ -761,7 +761,8 @@ def libraries_from_env(default: str | Path = "libraries"):
         return folder, None
     from slideseek.backup import LibraryBackup
 
-    copy = LibraryBackup(repo, folder, token=accounts_token_from_env())
+    token = os.environ.get("SLIDESEEK_LIBRARIES_TOKEN", "").strip() or accounts_token_from_env()
+    copy = LibraryBackup(repo, folder, token=token)
     copy.restore()
     log.info("people's own lectures are kept in %s, with a copy in the dataset %s", folder, repo)
     return folder, copy
@@ -790,6 +791,7 @@ def create_app_from_env() -> FastAPI:
     ``SLIDESEEK_LIBRARIES``   a directory to keep the lectures people add themselves in;
                                 without it (or the next), nobody can add any
     ``SLIDESEEK_LIBRARIES_REPO``  a private Hugging Face dataset to keep a copy of them in
+    ``SLIDESEEK_LIBRARIES_TOKEN``  a token that can write to it (or the accounts' token)
     """
     from slideseek.logs import configure_logging
 

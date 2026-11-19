@@ -10,6 +10,12 @@ Three things are measured, each against ground truth written by hand:
 
 Every script runs from the repository root and takes `--help`.
 
+One more script compares two indexes rather than measuring against ground truth:
+`compare_browser_index.py` asks a lecture added in the browser (`slideseek/library.py`) and
+the Python pipeline's index of the same recording the same pictures and questions, each
+searching that lecture alone, and writes `results/browser/metrics.json`. What it found is in
+[docs/browser-indexing.md](../docs/browser-indexing.md#searching-a-lecture-added-in-the-browser).
+
 To see all three run before any annotation exists, generate the synthetic demo lectures.
 They come with ground truth in exactly these formats:
 

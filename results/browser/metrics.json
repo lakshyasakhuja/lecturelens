@@ -1,0 +1,415 @@
+{
+  "lecture": "mit6-7960-lec04",
+  "python": {
+    "moments": 141,
+    "keyframes": 123,
+    "asr": "large-v3-turbo",
+    "pictures": {
+      "frame": {
+        "hit@1": 0.825,
+        "hit@5": 0.975,
+        "n": 40
+      },
+      "photo": {
+        "hit@1": 0.6,
+        "hit@5": 0.975,
+        "n": 40
+      },
+      "crop": {
+        "hit@1": 0.675,
+        "hit@5": 0.975,
+        "n": 40
+      }
+    }
+  },
+  "browser": {
+    "moments": 143,
+    "keyframes": 125,
+    "asr": "whisper-large-v3-turbo, 4-bit, in the browser",
+    "pictures": {
+      "frame": {
+        "hit@1": 0.825,
+        "hit@5": 1.0,
+        "n": 40
+      },
+      "photo": {
+        "hit@1": 0.575,
+        "hit@5": 0.975,
+        "n": 40
+      },
+      "crop": {
+        "hit@1": 0.675,
+        "hit@5": 1.0,
+        "n": 40
+      }
+    }
+  },
+  "questions": {
+    "n": 20,
+    "same_first": 17,
+    "top5_shared": 0.9,
+    "agree_within_s": 20.0,
+    "rows": [
+      {
+        "query": "why do we share weights across positions",
+        "python": [
+          1572.0,
+          1474.0,
+          2807.0,
+          2050.0,
+          1277.0
+        ],
+        "browser": [
+          1572.0,
+          1474.0,
+          2808.0,
+          2051.0,
+          1277.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "the picture of birds with arrows classifying each patch",
+        "python": [
+          964.0,
+          1152.0,
+          906.0,
+          1184.0,
+          1068.0
+        ],
+        "browser": [
+          964.0,
+          1152.0,
+          906.0,
+          1069.0,
+          1185.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "grid of feature visualisations for alexnet and vgg",
+        "python": [
+          3510.0,
+          3587.0,
+          2322.0,
+          2697.0,
+          2663.0
+        ],
+        "browser": [
+          3511.0,
+          3587.0,
+          2323.0,
+          2698.0,
+          2663.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "why build better architectures",
+        "python": [
+          46.0,
+          4536.0,
+          414.0,
+          306.0,
+          17.0
+        ],
+        "browser": [
+          4536.0,
+          46.0,
+          414.0,
+          307.0,
+          682.0
+        ],
+        "same_first": false
+      },
+      {
+        "query": "convolutional layers",
+        "python": [
+          1775.0,
+          2697.0,
+          2322.0,
+          2050.0,
+          2241.0
+        ],
+        "browser": [
+          1775.0,
+          2698.0,
+          2323.0,
+          2051.0,
+          2241.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "what is a convolution filter",
+        "python": [
+          1301.0,
+          1339.0,
+          1388.0,
+          2202.0,
+          1775.0
+        ],
+        "browser": [
+          1302.0,
+          1340.0,
+          1388.0,
+          2202.0,
+          1775.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "pooling and downsampling",
+        "python": [
+          2923.0,
+          2731.0,
+          2950.0,
+          2784.0,
+          2823.0
+        ],
+        "browser": [
+          2923.0,
+          2732.0,
+          2951.0,
+          2784.0,
+          2808.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "image pyramids",
+        "python": [
+          46.0,
+          4536.0,
+          2663.0,
+          1721.0,
+          4170.0
+        ],
+        "browser": [
+          46.0,
+          4536.0,
+          2663.0,
+          3587.0,
+          4170.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "the architecture zoo",
+        "python": [
+          4536.0,
+          46.0,
+          3615.0,
+          17.0,
+          3899.0
+        ],
+        "browser": [
+          46.0,
+          4536.0,
+          18.0,
+          3616.0,
+          307.0
+        ],
+        "same_first": false
+      },
+      {
+        "query": "neural fields and positional encodings",
+        "python": [
+          4320.0,
+          4654.0,
+          4422.0,
+          3441.0,
+          4346.0
+        ],
+        "browser": [
+          4320.0,
+          4423.0,
+          4654.0,
+          4347.0,
+          4261.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "multilayer perceptron inductive biases",
+        "python": [
+          181.5,
+          208.0,
+          234.5,
+          128.5,
+          155.0
+        ],
+        "browser": [
+          182.0,
+          208.667,
+          235.333,
+          128.667,
+          102.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "receptive field grows with depth",
+        "python": [
+          3441.0,
+          4320.0,
+          3014.0,
+          3510.0,
+          4422.0
+        ],
+        "browser": [
+          3442.0,
+          4320.0,
+          3015.0,
+          4423.0,
+          3511.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "translation equivariance",
+        "python": [
+          1184.0,
+          1775.0,
+          1152.0,
+          2807.0,
+          2784.0
+        ],
+        "browser": [
+          1775.0,
+          1185.0,
+          1152.0,
+          1648.0,
+          2808.0
+        ],
+        "same_first": false
+      },
+      {
+        "query": "residual connections",
+        "python": [
+          4119.0,
+          4004.0,
+          1452.0,
+          1474.0,
+          3951.0
+        ],
+        "browser": [
+          4120.0,
+          4005.0,
+          1460.0,
+          4030.0,
+          3951.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "U-Net for segmentation",
+        "python": [
+          1108.0,
+          3848.0,
+          3811.0,
+          3751.0,
+          3899.0
+        ],
+        "browser": [
+          1108.0,
+          3848.0,
+          3811.0,
+          1185.0,
+          682.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "how many parameters does a fully connected layer need for an image",
+        "python": [
+          1592.0,
+          1452.0,
+          1648.0,
+          261.0,
+          2546.0
+        ],
+        "browser": [
+          1592.0,
+          1460.0,
+          1648.0,
+          262.0,
+          2547.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "stride and padding",
+        "python": [
+          2971.0,
+          2950.0,
+          4566.0,
+          3047.0,
+          3154.8
+        ],
+        "browser": [
+          2972.0,
+          2951.0,
+          3048.0,
+          3155.0,
+          3126.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "feature maps in deeper layers",
+        "python": [
+          2322.0,
+          2697.0,
+          2663.0,
+          3510.0,
+          2241.0
+        ],
+        "browser": [
+          2323.0,
+          2698.0,
+          2663.0,
+          3511.0,
+          2241.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "fourier features for coordinates",
+        "python": [
+          4320.0,
+          2322.0,
+          2295.0,
+          4346.0,
+          4422.0
+        ],
+        "browser": [
+          4320.0,
+          2323.0,
+          2295.0,
+          4423.0,
+          4347.0
+        ],
+        "same_first": true
+      },
+      {
+        "query": "the lecture summary",
+        "python": [
+          0.0,
+          4536.0,
+          836.0,
+          102.0,
+          46.0
+        ],
+        "browser": [
+          0.0,
+          4536.0,
+          836.0,
+          102.0,
+          46.0
+        ],
+        "same_first": true
+      }
+    ]
+  }
+}

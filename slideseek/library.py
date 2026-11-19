@@ -83,6 +83,9 @@ MAX_STILL_PIXELS = 1920 * 1920
 MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024
 MAX_WORDS_PER_SECOND = 8  # nobody speaks faster than this; more is not a transcript
 MAX_WORD_CHARS = 64
+# Whisper pads the last 30-second window of the sound, and its word times can run into the
+# padding: a word that ends this far past the end is moved to the end, not refused.
+END_SLACK_S = 30.0
 MAX_IN_PROGRESS = 12  # lectures being added at once, across the whole site
 ABANDONED_AFTER_S = 2 * 86400  # a lecture still unfinished after this long is removed
 EMBED_BATCH = 8  # moments embedded per turn of the search lock
@@ -272,7 +275,7 @@ def clean_transcript(payload: Any, duration_s: float) -> tuple[list[asr.AsrSegme
     if not isinstance(payload, Mapping) or not isinstance(payload.get("segments"), list):
         raise LibraryError("Send the transcript as {model, segments}.")
     model = " ".join(str(payload.get("model", "")).split())[:120] or "unknown"
-    limit = duration_s + 2.0
+    limit = duration_s + END_SLACK_S
     budget = max(100, int(duration_s * MAX_WORDS_PER_SECOND))
     segments, count = [], 0
     for raw in payload["segments"]:
@@ -288,8 +291,12 @@ def clean_transcript(payload: Any, duration_s: float) -> tuple[list[asr.AsrSegme
             prob = float(prob) if isinstance(prob, (int, float)) and math.isfinite(prob) else 1.0
             if not text or len(text) > MAX_WORD_CHARS:
                 raise LibraryError("A word in the transcript is empty or too long.")
+            # Whisper's word times are sometimes the wrong way round (about one word in
+            # 14,000 on an 84-minute lecture); the two are swapped rather than refused.
+            start, end = min(start, end), max(start, end)
             if not 0 <= start <= end <= limit:
                 raise LibraryError("A word in the transcript is outside the lecture's length.")
+            start, end = min(start, duration_s), min(end, duration_s)
             words.append(asr.Word(text, start, end, min(max(prob, 0.0), 1.0)))
         count += len(words)
         if count > budget:

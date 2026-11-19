@@ -272,10 +272,20 @@ def test_the_environment_names_the_directory_and_the_dataset(tmp_path, monkeypat
     monkeypatch.setenv("SLIDESEEK_LIBRARIES", str(tmp_path / "mine"))
     assert server.libraries_from_env() == (tmp_path / "mine", None)
 
-    hub = FakeHub()
-    monkeypatch.setattr("huggingface_hub.HfApi", lambda token=None: hub)
+    hub, tokens = FakeHub(), []
+
+    def make_api(token=None):
+        tokens.append(token)
+        return hub
+
+    monkeypatch.setattr("huggingface_hub.HfApi", make_api)
     monkeypatch.delenv("SLIDESEEK_LIBRARIES")
     monkeypatch.setenv("SLIDESEEK_LIBRARIES_REPO", REPO)
+    monkeypatch.setenv("SLIDESEEK_ACCOUNTS_TOKEN", "accounts-token")
     folder, copy = server.libraries_from_env(tmp_path / "default")
     assert folder == tmp_path / "default" and copy.repo_id == REPO
     assert "snapshot_download" in hub.calls
+    # A token of its own wins over the accounts' token.
+    monkeypatch.setenv("SLIDESEEK_LIBRARIES_TOKEN", "libraries-token")
+    server.libraries_from_env(tmp_path / "default")
+    assert tokens == ["accounts-token", "libraries-token"]

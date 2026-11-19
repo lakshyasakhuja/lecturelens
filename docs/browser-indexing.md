@@ -54,8 +54,69 @@ Two other options were measured on the first 10 minutes, and neither is used:
   longer.
 - The video stays on the visitor's computer. What would be sent is the tiny frames (72 MB,
   or 13.6 MB compressed with gzip), 3.8 MB of stills and a 0.7 MB transcript.
-- Still to be measured (step 7 of the plan): whether search finds the same moments in an
-  index built from the browser's pieces, using `eval/eval_screenshot.py` and the example
-  queries.
+- Search finds the same moments in an index built from the browser's pieces as in the
+  Python one: see [below](#searching-a-lecture-added-in-the-browser).
 - Possible improvement: a voice-activity filter in the browser (Silero VAD runs in ONNX
   Runtime), to drop the garbled audience questions the way faster-whisper does.
+
+## Keeping the speech model
+
+transformers.js keeps what it downloads in the browser's Cache API. Building the page showed
+that Chrome stores the 194 MB decoder there but refuses the 370 MB encoder
+(`Failed to execute 'put' on 'Cache': Unexpected internal error`), so every lecture would
+download the encoder again. The speech worker therefore gives transformers.js a cache of its
+own over the origin's private file system (`static/capture/speech-worker.js`): each file is
+streamed to disk, and a marker named after the model's revision is written once all of them
+are there, which is how the page knows not to warn about the download. With the model kept
+this way, loading it took about 2 seconds before listening started, against 30 seconds or
+more to download it.
+
+## Searching a lecture added in the browser
+
+Lecture 4 was then added through the page itself, on `localhost` with a test account: the
+browser sent its frames, 125 stills and transcript, and the server built the lecture's index
+with its own stages (`slideseek/library.py`). `eval/compare_browser_index.py` asks that index
+and the Python pipeline's index of the same recording the same queries, each searching
+lecture 4 alone.
+
+| | Python pipeline | Added in the browser |
+|---|---|---|
+| Moments, slide keyframes | 141, 123 | 143, 125 |
+| Screenshot of the recording | 82.5% / 97.5% | 82.5% / 100% |
+| Simulated phone photo | 60.0% / 97.5% | 57.5% / 97.5% |
+| Crop of 55 to 75% of the slide | 67.5% / 97.5% | 67.5% / 100% |
+
+<sub>Found first / found in the top five: 40 frames at random times inside slides, seed 7,
+made into each kind of picture the way `eval/eval_screenshot.py` does, and each index judged
+against its own keyframe for that time. One picture is 2.5 points.</sub>
+
+For 17 of 20 typed questions the two put the same moment first, and they share 90% of their
+top five (two results agree when they start within 20 s). In each of the three that differ,
+the same two moments come first in the other order. The questions have no ground truth yet,
+so this is agreement between the two, not accuracy. The numbers are in
+`results/browser/metrics.json`.
+
+Once the transcript arrived, the server built the 84-minute lecture's search in about
+80 seconds on the M4 (it had read the slides as they came in).
+
+## What adding lectures showed
+
+- **Whisper's word times slip.** In the 84-minute lecture one word of 14,025 ended before it
+  started; in a 12-minute clip the last word was placed 3.5 s past the end of the sound, in
+  the padding of Whisper's last 30-second window. The server refused both transcripts at
+  first. The worker now keeps each word inside the sound, the right way round, and the
+  server mends the same two slips rather than refusing them: it swaps the two times, and
+  moves a word up to 30 s past the end to the end.
+- **Nothing heard is lost.** With the 12-minute clip, the server was stopped after the first
+  five-minute block and the lecture deleted from its disk, which is what a Space restart does
+  to an unfinished lecture (only finished ones are copied to the dataset). Dropping the same
+  file again made a new lecture, took the block the browser had kept and listened from
+  minute 5. The first five minutes' 816 words were in the transcript, and search found them.
+- **The model stays.** Kept in the private file system, it loaded in about 3 seconds. Once,
+  in the test browser, the model's folder was found empty after a long run, with its space
+  still counted, and the model was downloaded again; the cause was not found, and restarting
+  the server did not do it. The worker now logs a warning whenever it cannot keep a file.
+  The test browser did not grant `navigator.storage.persist()`, which the page asks for, so
+  a browser short of space may clear the model.
+- **Listening speed** held with the page in view: about 4× real time for the clip, as for the
+  full lecture.
