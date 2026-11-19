@@ -285,6 +285,8 @@ def test_renaming_and_deleting(tmp_path, frames):
 
 
 def test_deleting_an_account_deletes_its_library(tmp_path, frames):
+    pytest.importorskip("sqlalchemy", reason="the web extra is not installed")
+    pytest.importorskip("argon2", reason="the web extra is not installed")
     from fakes import ADA, fast_accounts
 
     accounts = fast_accounts()
