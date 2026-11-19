@@ -427,6 +427,12 @@ def serve(
         help="Serve the lab at /lab, a page that measures adding a lecture in the browser, "
         "and save what it captures in this directory. On your own machine only.",
     ),
+    library: Path | None = typer.Option(
+        None,
+        envvar="SLIDESEEK_LIBRARIES",
+        help="Let people add their own lectures from the browser, and keep them in this "
+        "directory. Run `slideseek vendor` first.",
+    ),
 ) -> None:
     """Open the search page for an index in your browser.
 
@@ -468,12 +474,15 @@ def serve(
         device=device,
         accounts=accounts,
         lab_dir=lab,
+        library=library,
     )
     if lab is not None:
         if host not in ("127.0.0.1", "localhost", "::1"):
             fail("--lab saves what it is sent, so it only runs on 127.0.0.1")
         console.print(f"The lab is at [bold]http://{host}:{port}/lab[/bold], saving to {lab}")
     console.print(f"Accounts are kept in {redacted(accounts.url)}")
+    if library is not None:
+        console.print(f"Lectures people add themselves are kept in {library}")
     console.print(f"Slideseek is at [bold]http://{host}:{port}[/bold]  (Ctrl+C to stop)")
     uvicorn.run(web_app, host=host, port=port, log_level="warning", access_log=False)
 

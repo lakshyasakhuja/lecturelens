@@ -144,6 +144,7 @@ def create_space(
     device: str = "cpu",
     warm_up: bool = True,
     accounts: AccountStore | None = None,
+    library: Any | None = None,
 ) -> gradio.Server:
     """The web app as a Gradio server. Call ``.launch()`` on the result to serve it.
 
@@ -151,6 +152,8 @@ def create_space(
     cross-encoder, loaded now: ZeroGPU can only hand a model to a GPU later if the model
     was placed on ``cuda`` while the app was starting. With ``rerank=False`` no reranker is
     loaded, the page shows no switch and the endpoint does not exist.
+
+    ``library`` is where the lectures people add themselves are kept (see ``create_app``).
 
     Every model is loaded here, before the server starts, rather than in the background as
     ``create_app`` does. ZeroGPU patches PyTorch for the thread that imported ``spaces``,
@@ -185,6 +188,7 @@ def create_space(
         app=server,
         rerank=rerank,
         accounts=accounts,
+        library=library,
     )
     if not rerank:
         return server
@@ -196,13 +200,17 @@ def create_space(
         query: str,
         k: int = 5,
         lectures: list[str] | None = None,
+        scope: str = "all",
         request: gradio.Request = None,
     ) -> dict:
         """Search, then rescore the fused top results with the cross-encoder."""
-        if account_for(request_cookies(request)) is None:
+        account = account_for(request_cookies(request))
+        if account is None:
             raise gradio.Error(SIGN_IN_FIRST)
         try:
-            return run_search(query, int(k), lectures or None, rerank=True)
+            return run_search(
+                query, int(k), lectures or None, rerank=True, account=account, scope=scope
+            )
         except BadRequest as error:
             raise gradio.Error(str(error)) from error
 
@@ -239,6 +247,7 @@ def create_space_from_env() -> gradio.Server:
         ),
         device=os.environ.get("SLIDESEEK_DEVICE", "cpu"),
         accounts=accounts_from_env(default_database_url()),
+        library=os.environ.get("SLIDESEEK_LIBRARIES", "").strip() or None,
     )
 
 

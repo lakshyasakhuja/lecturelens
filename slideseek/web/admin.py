@@ -14,14 +14,15 @@
 Each answers 401 to nobody signed in and 403 to anyone who is not an admin. The store asks
 the database again whether the one asking is an admin, and refuses what the default admin
 is protected from (see ``slideseek.accounts``). An admin is shown every account's details,
-never its password hash.
+never its password hash; and, when people can add their own lectures, how many each
+account has added and how much space they take, never what they are.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
@@ -37,6 +38,9 @@ from slideseek.accounts import (
     phone_parts,
 )
 from slideseek.web.auth import SignUp, _Form, problem, session_token
+
+if TYPE_CHECKING:
+    from slideseek.library import Library
 
 log = logging.getLogger(__name__)
 
@@ -64,10 +68,19 @@ def _when(timestamp: int | None) -> str | None:
 
 
 def admin_view(
-    store: AccountStore, account: Account, actor: Account, record: AccountRecord | None = None
+    store: AccountStore,
+    account: Account,
+    actor: Account,
+    record: AccountRecord | None = None,
+    usage: dict[str, dict[str, int]] | None = None,
 ) -> dict[str, Any]:
-    """An account as an admin is shown it."""
+    """An account as an admin is shown it. ``usage`` is ``Library.usage()``, if there is one."""
     region, national = phone_parts(account.phone)
+    library = None
+    if usage is not None:
+        from slideseek.library import owner_key
+
+        library = usage.get(owner_key(account), {"lectures": 0, "bytes": 0})
     return {
         "id": account.id,
         "username": account.username,
@@ -82,6 +95,7 @@ def admin_view(
         "you": account.id == actor.id,
         "sessions": record.sessions if record else None,
         "signed_in": _when(record.signed_in_at) if record else None,
+        "library": library,
     }
 
 
@@ -96,7 +110,7 @@ def refused(error: Exception) -> JSONResponse:
     return problem(403, str(error))
 
 
-def add_admin_routes(app: FastAPI, store: AccountStore) -> None:
+def add_admin_routes(app: FastAPI, store: AccountStore, library: Library | None = None) -> None:
     """Add the admin routes to ``app``, whose ``state.account_for`` says who is asking."""
 
     def admin(request: Request) -> Account:
@@ -120,8 +134,9 @@ def add_admin_routes(app: FastAPI, store: AccountStore) -> None:
         actor: Account = Depends(admin),
     ) -> Response:
         records, total = store.list_accounts(q, limit=limit, offset=offset)
+        usage = library.usage() if library is not None else None
         body = {
-            "accounts": [admin_view(store, r.account, actor, r) for r in records],
+            "accounts": [admin_view(store, r.account, actor, r, usage) for r in records],
             "total": total,
             "offset": offset,
             "all": store.count(),

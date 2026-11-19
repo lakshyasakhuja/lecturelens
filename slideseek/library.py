@@ -449,6 +449,18 @@ class Library:
         with self._files:
             return self.describe(self._state(owner, lecture_id))
 
+    def progress(self, owner: str, lecture_id: str) -> dict[str, Any]:
+        """A lecture with what has arrived: enough for a page that was reloaded to send only
+        what is still missing."""
+        with self._files:
+            state = self._state(owner, lecture_id)
+        return {
+            **self.describe(state),
+            "keyframe_times": state["keyframe_times"],
+            "received": state["stills"],
+            "transcript": bool(state["transcript"]),
+        }
+
     def file_of(self, owner: str, lecture_id: str) -> dict[str, Any]:
         """The name and size of the recording a lecture came from."""
         with self._files:

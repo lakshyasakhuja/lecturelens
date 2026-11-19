@@ -5,6 +5,7 @@
     GET /api/search?q=...           the top moments for a query                 (signed in)
     POST /api/search/picture        the moments where the slide in a picture was shown  (signed in)
     GET /thumbs/<lecture>/<ms>.jpg  slide thumbnails, straight from the index directory
+    /api/library...                 your own lectures, added from the browser: ``library.py``
     GET /                           the frontend (plain HTML, CSS and JavaScript, no build step)
     GET /admin                      the accounts page, for admins
     /api/account...                 signing up, in and out: see ``auth.py``
@@ -13,10 +14,15 @@
 Searching needs an account. Without one, the page and what the library contains are still
 shown, but a search is answered with 401 until the visitor signs in.
 
-Beyond the loaded index, the only state is the accounts, which live in a SQL database
-(``accounts.py``). The server hosts no video: a result either links out to where the
-lecture already lives (a YouTube id parsed from the lecture's link template) or, when run
-locally with a directory of recordings, plays the local file.
+Beyond the loaded index, the state is the accounts, which live in a SQL database
+(``accounts.py``), and, when the server is given one, the lectures people added themselves
+(``slideseek.library``). Each account searches the public lectures and its own together:
+``scope`` narrows that to ``mine`` or ``public``.
+
+The server hosts no video: a result either links out to where the lecture already lives (a
+YouTube id parsed from the lecture's link template), or, when run locally with a directory
+of recordings, plays the local file, or, for somebody's own lecture, tells the page which
+file on their computer to play it from.
 
 Search runs on a CPU. One query at a time goes through the encoders, guarded by a lock: a
 query takes about a tenth of a second, and serialising them is simpler and safer than
@@ -34,10 +40,12 @@ import os
 import re
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
@@ -52,6 +60,9 @@ from slideseek.utils import format_timestamp, read_json
 from slideseek.web.admin import add_admin_routes
 from slideseek.web.auth import UNSAFE_METHODS, add_account_routes, same_origin
 
+if TYPE_CHECKING:
+    from slideseek.library import Library
+
 log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -64,6 +75,12 @@ PICTURE_SIDE = 1600
 # Where accounts are kept when nothing says otherwise: a file beside where the server runs.
 DEFAULT_DATABASE_URL = "sqlite:///accounts.db"
 SIGN_IN_FIRST = "Sign in to search."
+# What a search covers: everything the visitor can search, only their own lectures, or only
+# the public ones.
+SCOPES = ("all", "mine", "public")
+# Searchers over somebody's own lectures and the public ones, kept for the accounts that
+# searched most recently.
+OWN_SEARCHERS = 20
 
 
 class BadRequest(ValueError):
@@ -225,6 +242,7 @@ def create_app(
     rerank: bool = False,
     accounts: AccountStore | None = None,
     lab_dir: str | Path | None = None,
+    library: Library | str | Path | None = None,
 ) -> FastAPI:
     """Build the application around a loaded index.
 
@@ -238,6 +256,10 @@ def create_app(
 
     ``lab_dir`` turns on the lab (``lab.py``), which saves what it is sent into that
     directory. Only for a server on your own machine.
+
+    ``library`` lets people add their own lectures (``slideseek.library``): a directory to
+    keep them in, or a ``Library`` already made. Either way it shares ``searcher``'s models
+    and lock, and is told when an account is deleted.
     """
     searcher = searcher or Searcher(index, device=device)
     if accounts is None:
@@ -246,6 +268,10 @@ def create_app(
     local_videos = find_local_videos(videos_dir, index.lectures)
     lock = threading.Lock()
     ready = threading.Event()
+    if isinstance(library, (str, Path)):
+        library = make_library(library, searcher, lock)
+    elif library is not None:
+        library.model_lock = lock
 
     def _warm() -> None:
         with lock:
@@ -288,7 +314,63 @@ def create_app(
         return response
 
     add_account_routes(app, accounts)
-    add_admin_routes(app, accounts)
+    add_admin_routes(app, accounts, library)
+    if library is not None:
+        from slideseek.library import owner_key
+
+        accounts.on_account_deleted = lambda account: library.delete_owner(owner_key(account))
+    own_searchers: OrderedDict[str, tuple[int, Searcher, dict[str, dict]]] = OrderedDict()
+
+    def searcher_for(account: Account | None) -> tuple[Searcher, dict[str, dict]]:
+        """The searcher for this account, and the files its own lectures came from.
+
+        Call it holding ``lock``: a new searcher shares the models with ``searcher``.
+        """
+        if library is None or account is None:
+            return searcher, {}
+        owner = owner_key(account)
+        version = library.version(owner)
+        held = own_searchers.get(owner)
+        if held is not None and held[0] == version:
+            own_searchers.move_to_end(owner)
+            return held[1], held[2]
+        own = library.index(owner)
+        if own is None:
+            own_searchers.pop(owner, None)
+            return searcher, {}
+        combined = Searcher(
+            Index.combine(index, own),
+            config=searcher.config,
+            text_embedder=searcher.text_embedder,
+            image_embedder=searcher.image_embedder,
+            reranker=searcher.reranker,
+            device=device,
+            ocr=searcher.ocr if searcher.can_read_pictures else None,
+        )
+        files = {
+            item["lecture_id"]: item["file"]
+            for item in library.lectures(owner)
+            if item["stage"] == "ready"
+        }
+        own_searchers[owner] = (version, combined, files)
+        while len(own_searchers) > OWN_SEARCHERS:
+            own_searchers.popitem(last=False)
+        return combined, files
+
+    def scope_mask(active: Searcher, scope: str, lecture: Sequence[str] | None):
+        """Which moments a search may return: ``scope`` and ``lecture`` together."""
+        if scope not in SCOPES:
+            raise BadRequest(f"Search scope is one of {', '.join(SCOPES)}.")
+        wanted = set(lecture or active.index.lectures)
+        if scope == "public":
+            wanted &= set(index.lectures)
+        elif scope == "mine":
+            wanted -= set(index.lectures)
+        if not wanted:
+            return np.zeros(len(active.index), dtype=bool)  # nothing: no results
+        if wanted >= set(active.index.lectures):
+            return None
+        return active.lecture_mask(wanted)
 
     def signed_in(request: Request) -> Account:
         account = app.state.account_for(request.cookies)
@@ -296,7 +378,17 @@ def create_app(
             raise HTTPException(status_code=401, detail=SIGN_IN_FIRST)
         return account
 
-    def player(lecture_id: str, start: float) -> dict[str, Any] | None:
+    def player(
+        lecture_id: str, start: float, own: Mapping[str, dict] | None = None
+    ) -> dict[str, Any] | None:
+        if own and lecture_id in own:
+            # Somebody's own lecture: the page plays it from the file on their computer.
+            return {
+                "kind": "own",
+                "lecture_id": lecture_id,
+                "file": dict(own[lecture_id]),
+                "start": int(start),
+            }
         if lecture_id in local_videos:
             return {
                 "kind": "file",
@@ -309,8 +401,16 @@ def create_app(
             return {"kind": "youtube", "video_id": video_id, "start": int(start)}
         return None
 
-    def serialise(result: Result) -> dict[str, Any]:
-        relative = str(index.moments["thumb"].iat[result.row])
+    def serialise(
+        result: Result, active: Searcher | None = None, own: Mapping[str, dict] | None = None
+    ) -> dict[str, Any]:
+        relative = str((active or searcher).index.moments["thumb"].iat[result.row])
+        if result.thumb is None:
+            thumb = None
+        elif own and result.lecture_id in own:
+            thumb = f"/api/library/thumbs/{result.lecture_id}/{Path(relative).name}"
+        else:
+            thumb = f"/{relative}"
         return {
             "rank": result.rank,
             "moment_id": result.moment_id,
@@ -321,8 +421,9 @@ def create_app(
             "timestamp": result.timestamp,
             "end_timestamp": format_timestamp(result.t_end),
             "video_link": result.video_link if result.video_link.startswith("http") else "",
-            "player": player(result.lecture_id, result.t_start),
-            "thumb": f"/{relative}" if result.thumb is not None else None,
+            "player": player(result.lecture_id, result.t_start, own),
+            "thumb": thumb,
+            "own": bool(own and result.lecture_id in own),
             "badges": list(result.badges),
             "signals": result.signals,
             "snippet": result.snippet,
@@ -385,9 +486,16 @@ def create_app(
         }
 
     def run_search(
-        q: str, k: int = 5, lecture: Sequence[str] | None = None, *, rerank: bool = False
+        q: str,
+        k: int = 5,
+        lecture: Sequence[str] | None = None,
+        *,
+        rerank: bool = False,
+        account: Account | None = None,
+        scope: str = "all",
     ) -> dict[str, Any]:
-        """Answer one query. Raises ``BadRequest`` for a query that cannot be answered."""
+        """Answer one query for ``account``. Raises ``BadRequest`` for a query that cannot
+        be answered."""
         query = " ".join(str(q).split())
         if not query:
             raise BadRequest("The query is empty.")
@@ -395,58 +503,69 @@ def create_app(
             raise BadRequest(f"The query is longer than {MAX_QUERY_CHARS} characters.")
         if not 1 <= k <= MAX_RESULTS:
             raise BadRequest(f"Ask for between 1 and {MAX_RESULTS} moments.")
-        unknown = sorted(set(lecture or []) - set(index.lectures))
-        if unknown:
-            raise BadRequest(f"Unknown lecture: {', '.join(unknown)}")
 
         was_ready = ready.is_set()
         with lock:
+            active, own = searcher_for(account)
+            check_request(k, lecture, active)
+            mask = scope_mask(active, scope, lecture)
             # Timed inside the lock: the figure is the search itself, not time spent queued
             # behind another query or behind the models loading.
             started = time.perf_counter()
-            encoding = searcher.encode(query)
-            order, scores, per_ranker = searcher.fuse(
-                encoding, mask=searcher.lecture_mask(lecture or None)
-            )
+            encoding = active.encode(query)
+            order, scores, per_ranker = active.fuse(encoding, mask=mask)
             took_ms = (time.perf_counter() - started) * 1000.0
         payload: dict[str, Any] = {"query": query, "took_ms": round(took_ms, 1), "warm": was_ready}
         if rerank and order:
             # Outside the lock: the reranker may wait for a GPU, and plain searches from
             # other visitors should not wait with it.
             started = time.perf_counter()
-            order, scores = searcher.rerank(query, order, scores)
+            if active.reranker is None and searcher.reranker is not None:
+                active.reranker = searcher.reranker
+            order, scores = active.rerank(query, order, scores)
+            if searcher.reranker is None:
+                searcher.reranker = active.reranker  # one cross-encoder for every searcher
             payload["rerank_ms"] = round((time.perf_counter() - started) * 1000.0, 1)
-        results = searcher.results(order, scores, encoding, per_ranker, k)
+        results = active.results(order, scores, encoding, per_ranker, k)
         payload["reranked"] = "rerank_ms" in payload
         payload["count"] = len(results)
-        payload["results"] = [serialise(result) for result in results]
+        payload["results"] = [serialise(result, active, own) for result in results]
         return payload
 
     app.state.run_search = run_search
 
-    def check_request(k: int, lecture: Sequence[str] | None) -> None:
+    def check_request(k: int, lecture: Sequence[str] | None, active: Searcher) -> None:
         if not 1 <= k <= MAX_RESULTS:
             raise BadRequest(f"Ask for between 1 and {MAX_RESULTS} moments.")
-        unknown = sorted(set(lecture or []) - set(index.lectures))
+        unknown = sorted(set(lecture or []) - set(active.index.lectures))
         if unknown:
             raise BadRequest(f"Unknown lecture: {', '.join(unknown)}")
 
     def run_picture_search(
-        data: bytes, k: int = 5, lecture: Sequence[str] | None = None
+        data: bytes,
+        k: int = 5,
+        lecture: Sequence[str] | None = None,
+        *,
+        account: Account | None = None,
+        scope: str = "all",
     ) -> dict[str, Any]:
         """Answer a picture query. Raises ``BadRequest`` for a picture that cannot be used."""
-        check_request(k, lecture)
+        if not 1 <= k <= MAX_RESULTS:
+            raise BadRequest(f"Ask for between 1 and {MAX_RESULTS} moments.")
+        if scope not in SCOPES:
+            raise BadRequest(f"Search scope is one of {', '.join(SCOPES)}.")
         picture = load_picture(data)
         was_ready = ready.is_set()
         with lock:
+            active, own = searcher_for(account)
+            check_request(k, lecture, active)
+            mask = scope_mask(active, scope, lecture)
             started = time.perf_counter()
-            encoding = searcher.encode_picture(picture, read_text=searcher.can_read_pictures)
+            encoding = active.encode_picture(picture, read_text=active.can_read_pictures)
             rankers = PICTURE_RANKERS if encoding.terms else ("image",)
-            order, scores, per_ranker = searcher.fuse(
-                encoding, rankers, mask=searcher.lecture_mask(lecture or None)
-            )
+            order, scores, per_ranker = active.fuse(encoding, rankers, mask=mask)
             took_ms = (time.perf_counter() - started) * 1000.0
-        results = searcher.results(order, scores, encoding, per_ranker, k)
+        results = active.results(order, scores, encoding, per_ranker, k)
         return {
             "kind": "picture",
             "read": " ".join(encoding.query.split())[:200],
@@ -454,7 +573,7 @@ def create_app(
             "warm": was_ready,
             "reranked": False,
             "count": len(results),
-            "results": [serialise(result) for result in results],
+            "results": [serialise(result, active, own) for result in results],
         }
 
     app.state.run_picture_search = run_picture_search
@@ -464,6 +583,7 @@ def create_app(
         request: Request,
         k: int = Query(5, ge=1, le=MAX_RESULTS, description="How many moments to return."),
         lecture: list[str] | None = Query(None, description="Restrict to these lecture ids."),
+        scope: str = Query("all", description="all, mine (your own lectures) or public."),
         account: Account = Depends(signed_in),
     ) -> dict[str, Any]:
         """The request body is the picture itself: PNG, JPEG, WebP or GIF."""
@@ -476,7 +596,11 @@ def create_app(
                 raise HTTPException(status_code=413, detail="The picture is larger than 8 MB.")
             chunks.append(chunk)
         try:
-            return await run_in_threadpool(run_picture_search, b"".join(chunks), k, lecture)
+            return await run_in_threadpool(
+                lambda: run_picture_search(
+                    b"".join(chunks), k, lecture, account=account, scope=scope
+                )
+            )
         except BadRequest as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -485,10 +609,11 @@ def create_app(
         q: str = Query(..., description="The question, in plain English."),
         k: int = Query(5, ge=1, le=MAX_RESULTS, description="How many moments to return."),
         lecture: list[str] | None = Query(None, description="Restrict to these lecture ids."),
+        scope: str = Query("all", description="all, mine (your own lectures) or public."),
         account: Account = Depends(signed_in),
     ) -> dict[str, Any]:
         try:
-            return run_search(q, k, lecture)
+            return run_search(q, k, lecture, account=account, scope=scope)
         except BadRequest as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -506,8 +631,28 @@ def create_app(
         from slideseek.web.lab import add_lab_routes
 
         add_lab_routes(app, lab_dir)
+    if library is not None:
+        from slideseek.web.library import add_library_routes
+
+        add_library_routes(app, library, signed_in)
+    app.state.library = library
     add_frontend(app)
     return app
+
+
+def make_library(root: str | Path, searcher: Searcher, lock: threading.Lock) -> Library:
+    """A library in ``root`` that embeds with ``searcher``'s models, under ``lock``, and reads
+    slides with the indexer's OCR settings."""
+    from slideseek.library import Library, Models
+    from slideseek.pipeline import PipelineConfig
+
+    def models() -> Models:
+        from slideseek.ocr import OcrEngine
+
+        with lock:  # loading them must not race the warm-up, which loads them too
+            return Models(searcher.text_embedder, searcher.image_embedder, OcrEngine())
+
+    return Library(root, models, lock=lock, config=PipelineConfig(embed=searcher.embed_config))
 
 
 def add_frontend(app: FastAPI) -> None:
@@ -609,6 +754,8 @@ def create_app_from_env() -> FastAPI:
                                 accounts' SQLite file in, for a disk that does not last
     ``SLIDESEEK_ACCOUNTS_TOKEN``  a token that can write to that dataset (or ``HF_TOKEN``)
     ``SLIDESEEK_ADMIN``       the username of the default admin, an account that exists
+    ``SLIDESEEK_LIBRARIES``   a directory to keep the lectures people add themselves in;
+                                without it, nobody can add any
     """
     from slideseek.logs import configure_logging
 
@@ -628,4 +775,5 @@ def create_app_from_env() -> FastAPI:
         ),
         device=os.environ.get("SLIDESEEK_DEVICE", "cpu"),
         accounts=accounts_from_env(),
+        library=os.environ.get("SLIDESEEK_LIBRARIES", "").strip() or None,
     )

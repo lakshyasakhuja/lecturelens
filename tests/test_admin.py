@@ -461,6 +461,7 @@ def test_an_admin_sees_every_account_but_never_a_password(ada, app):
         "you": False,
         "sessions": 1,
         "signed_in": grace["signed_in"],
+        "library": None,  # this server takes no lectures of anybody's own
     }
     me = next(a for a in body["accounts"] if a["username"] == "ada")
     assert me["default"] and me["you"] and me["admin"]

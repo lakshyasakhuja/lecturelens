@@ -113,4 +113,5 @@ ignore = [
 "slideseek/cli.py" = ["B008"]
 "slideseek/web/server.py" = ["B008"] # the same pattern, for FastAPI's Query(...)
 "slideseek/web/admin.py" = ["B008"] # and for its Depends(...)
+"slideseek/web/library.py" = ["B008"]
 "eval/*.py" = ["B008", "E402"] # E402: the scripts put the repo root on sys.path first
