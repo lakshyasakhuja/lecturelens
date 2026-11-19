@@ -422,6 +422,11 @@ def serve(
         help="Username of the default admin: an account you have signed up for. It is made an "
         "admin, and no other admin can change or delete it.",
     ),
+    lab: Path | None = typer.Option(
+        None,
+        help="Serve the lab at /lab, a page that measures adding a lecture in the browser, "
+        "and save what it captures in this directory. On your own machine only.",
+    ),
 ) -> None:
     """Open the search page for an index in your browser.
 
@@ -462,7 +467,12 @@ def serve(
         picture_benchmark=load_picture_benchmark("results/screenshot/metrics.json"),
         device=device,
         accounts=accounts,
+        lab_dir=lab,
     )
+    if lab is not None:
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            fail("--lab saves what it is sent, so it only runs on 127.0.0.1")
+        console.print(f"The lab is at [bold]http://{host}:{port}/lab[/bold], saving to {lab}")
     console.print(f"Accounts are kept in {redacted(accounts.url)}")
     console.print(f"Slideseek is at [bold]http://{host}:{port}[/bold]  (Ctrl+C to stop)")
     uvicorn.run(web_app, host=host, port=port, log_level="warning", access_log=False)
@@ -573,6 +583,26 @@ def deploy(
         )
     console.print(f"[green]Deployed[/green] {url}")
     console.print("It builds for a few minutes, then loads the models; watch the Logs tab there.")
+
+
+@app.command()
+def vendor() -> None:
+    """Fetch the scripts the page runs speech recognition with, at their pinned versions.
+
+    They are checked against the npm registry's checksum and a hash recorded in
+    slideseek/web/vendor.py, then served from the page's own origin.
+    """
+    setup_logging()
+    from slideseek.web.vendor import VENDOR_DIR, VendorError, fetch
+
+    try:
+        written = fetch()
+    except (VendorError, OSError) as err:
+        fail(str(err))
+    if written:
+        console.print(f"[green]Fetched[/green] {', '.join(written)} -> {VENDOR_DIR}")
+    else:
+        console.print(f"Already in place: {VENDOR_DIR}")
 
 
 # --------------------------------------------------------------------------------------

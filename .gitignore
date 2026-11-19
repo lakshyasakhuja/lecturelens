@@ -21,6 +21,9 @@ index/
 *.wav
 *.npy
 
+# Fetched at pinned versions by `slideseek vendor` (slideseek/web/vendor.py), not kept in git
+slideseek/web/static/vendor/browser/
+
 # Local model and data caches
 .cache/
 hf_cache/

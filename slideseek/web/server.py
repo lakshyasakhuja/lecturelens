@@ -88,6 +88,19 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "frame-ancestors 'self' https://huggingface.co https://*.hf.space",
     ]
 )
+# Adding a lecture in the browser (static/capture/): the visitor's own file is read
+# through a blob: URL, ONNX Runtime compiles WebAssembly and runs in a worker, and Whisper's
+# weights come from the Hugging Face Hub, which hands the download on to storage under hf.co.
+SPEECH_PATHS = ("/capture/", "/vendor/browser/", "/lab/")
+SPEECH_CONTENT_SECURITY_POLICY = (
+    CONTENT_SECURITY_POLICY.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'")
+    .replace("media-src 'self'", "media-src 'self' blob:")
+    .replace(
+        "default-src 'self'",
+        "default-src 'self'; worker-src 'self'; "
+        "connect-src 'self' https://huggingface.co https://*.hf.co",
+    )
+)
 
 
 def load_picture(data: bytes):
@@ -211,6 +224,7 @@ def create_app(
     app: FastAPI | None = None,
     rerank: bool = False,
     accounts: AccountStore | None = None,
+    lab_dir: str | Path | None = None,
 ) -> FastAPI:
     """Build the application around a loaded index.
 
@@ -221,6 +235,9 @@ def create_app(
 
     ``accounts`` is where the accounts are kept. Without one they are kept in memory and
     are gone when the server stops, which suits a test and nothing else.
+
+    ``lab_dir`` turns on the lab (``lab.py``), which saves what it is sent into that
+    directory. Only for a server on your own machine.
     """
     searcher = searcher or Searcher(index, device=device)
     if accounts is None:
@@ -258,7 +275,12 @@ def create_app(
             response = JSONResponse({"detail": "Requests from other sites are refused."}, 403)
         else:
             response = await call_next(request)
-        response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            SPEECH_CONTENT_SECURITY_POLICY
+            if request.url.path == "/lab" or request.url.path.startswith(SPEECH_PATHS)
+            else CONTENT_SECURITY_POLICY,
+        )
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         if request.url.path.startswith("/thumbs/"):
@@ -480,6 +502,10 @@ def create_app(
         app.mount("/thumbs", StaticFiles(directory=index.root / "thumbs"), name="thumbs")
     if local_videos:
         app.mount("/videos", StaticFiles(directory=Path(videos_dir)), name="videos")
+    if lab_dir is not None:
+        from slideseek.web.lab import add_lab_routes
+
+        add_lab_routes(app, lab_dir)
     add_frontend(app)
     return app
 

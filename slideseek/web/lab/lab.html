@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lab. Slideseek.</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/lab/lab.css">
+  <script type="module" src="/lab/lab.js"></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Lab, on this machine only</p>
+    <h1>Index a recording in the browser.</h1>
+    <p class="lead">Each step runs here, timed, and what it captures is saved beside the
+      server, for comparing with the Python pipeline. Nothing is added to any library.</p>
+
+    <form id="form">
+      <label>Recording <input type="file" id="file" accept="video/*,audio/*"></label>
+      <label>Or a file the server serves <input type="text" id="url" placeholder="/videos/lecture.mp4"></label>
+      <label>Speech model
+        <select id="model">
+          <option value="turbo-q4f16">large-v3-turbo, q4f16 (about 560 MB)</option>
+          <option value="turbo-fp16">large-v3-turbo, fp16 encoder (about 1.6 GB)</option>
+          <option value="small">small, fp16 encoder (about 320 MB)</option>
+        </select>
+      </label>
+      <label>Only the first <input type="number" id="limit" min="0" step="1" value="0"> seconds of speech (0: all)</label>
+      <label>Glossary for Whisper (optional) <textarea id="prompt" rows="3"></textarea></label>
+      <fieldset>
+        <legend>Steps</legend>
+        <label><input type="checkbox" id="do-frames" checked> Frames</label>
+        <label><input type="checkbox" id="do-stills" checked> Stills</label>
+        <label><input type="checkbox" id="do-speech" checked> Speech</label>
+      </fieldset>
+      <label>Save as <input type="text" id="name" value="run" pattern="[a-z0-9][a-z0-9._-]*"></label>
+      <button type="submit" id="start">Start</button>
+    </form>
+
+    <ol id="steps"></ol>
+    <pre id="summary" aria-live="polite"></pre>
+  </main>
+</body>
+</html>

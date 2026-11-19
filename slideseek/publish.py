@@ -172,12 +172,19 @@ def stage_space(dest: str | Path, root: str | Path = ".") -> Path:
             f"{source} has no {', '.join(missing)}; run this from the root of the repository"
         )
     dest.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        Path(__file__).parent,
-        dest / "slideseek",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".*"),
-        dirs_exist_ok=True,
-    )
+    package = Path(__file__).parent
+    usual = shutil.ignore_patterns("__pycache__", "*.pyc", ".*")
+    # The browser's speech-recognition scripts (`slideseek vendor`) are fetched, not kept in
+    # git, and no page the Space serves uses them yet; only the lab does.
+    fetched = package / "web" / "static" / "vendor"
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        skipped = set(usual(directory, names))
+        if Path(directory) == fetched:
+            skipped.add("browser")
+        return skipped
+
+    shutil.copytree(package, dest / "slideseek", ignore=ignore, dirs_exist_ok=True)
     for name in SPACE_FILES:
         shutil.copy2(source / name, dest / name)
     for optional in (
