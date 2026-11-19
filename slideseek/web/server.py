@@ -750,7 +750,9 @@ def libraries_from_env(default: str | Path = "libraries"):
     dataset to keep a copy in, restored into the directory now (with ``default`` as the
     directory if none is named), written with ``SLIDESEEK_LIBRARIES_TOKEN`` or else the
     accounts' token. Returns ``(directory, LibraryBackup)``, either of them ``None``.
-    Raises ``BackupError`` if there is a copy that cannot be restored.
+
+    If the copy cannot be restored (the token cannot reach the dataset, say), both are
+    ``None``: the site starts with adding lectures switched off, and says why in the log.
     """
     folder = os.environ.get("SLIDESEEK_LIBRARIES", "").strip()
     repo = os.environ.get("SLIDESEEK_LIBRARIES_REPO", "").strip()
@@ -759,11 +761,18 @@ def libraries_from_env(default: str | Path = "libraries"):
     folder = Path(folder or default)
     if not repo:
         return folder, None
-    from slideseek.backup import LibraryBackup
+    from slideseek.backup import BackupError, LibraryBackup
 
     token = os.environ.get("SLIDESEEK_LIBRARIES_TOKEN", "").strip() or accounts_token_from_env()
     copy = LibraryBackup(repo, folder, token=token)
-    copy.restore()
+    try:
+        copy.restore()
+    except BackupError as error:
+        # Searching and accounts do not need people's own lectures, so the site starts
+        # without them rather than not at all. Nothing is written to the dataset meanwhile,
+        # so nothing in it is lost.
+        log.error("adding lectures is switched off: %s", error)
+        return None, None
     log.info("people's own lectures are kept in %s, with a copy in the dataset %s", folder, repo)
     return folder, copy
 

@@ -305,6 +305,9 @@ the large files nothing points at any more. The dataset is checked to be private
 every upload, and `slideseek deploy` refuses a public one. A lecture still being added when
 the Space restarts is not in the copy. Adding the same recording again starts it afresh,
 but reuses what the browser had already transcribed, which it keeps until the server has it.
+If the copy cannot be restored at start-up (most often, the token cannot reach the dataset),
+the Space starts anyway with adding lectures switched off, and its log says why: searching
+and accounts do not depend on it, and nothing is written to the dataset until it is fixed.
 
 This puts the slide text, transcripts and thumbnails of the lectures people add in a
 private repository on your Hugging Face account. Anyone who can sign in to that account, or

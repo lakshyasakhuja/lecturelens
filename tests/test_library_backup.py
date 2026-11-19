@@ -289,3 +289,18 @@ def test_the_environment_names_the_directory_and_the_dataset(tmp_path, monkeypat
     monkeypatch.setenv("SLIDESEEK_LIBRARIES_TOKEN", "libraries-token")
     server.libraries_from_env(tmp_path / "default")
     assert tokens == ["accounts-token", "libraries-token"]
+
+
+def test_a_copy_that_cannot_be_reached_switches_adding_lectures_off(tmp_path, monkeypatch, caplog):
+    from slideseek.web import server
+
+    # A token that cannot reach the dataset: it is not found, and cannot be created.
+    hub = FakeHub(exists=False)
+    hub.failures["create_repo"] = 1
+    monkeypatch.setattr("huggingface_hub.HfApi", lambda token=None: hub)
+    monkeypatch.delenv("SLIDESEEK_LIBRARIES", raising=False)
+    monkeypatch.setenv("SLIDESEEK_LIBRARIES_REPO", REPO)
+    with caplog.at_level("ERROR", logger="slideseek.web.server"):
+        assert server.libraries_from_env(tmp_path / "default") == (None, None)
+    assert "adding lectures is switched off" in caplog.text and REPO in caplog.text
+    assert "upload_folder" not in hub.calls and not (tmp_path / "default").exists()
