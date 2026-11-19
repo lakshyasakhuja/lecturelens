@@ -155,7 +155,7 @@ ZERO_GPU = "zero-a10g"
 USERNAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{2,29}")
 
 
-def stage_space(dest: str | Path, root: str | Path = ".") -> Path:
+def stage_space(dest: str | Path, root: str | Path = ".", *, browser: bool = False) -> Path:
     """Assemble the files a Space runs from, in ``dest``. Returns ``dest``.
 
     A Gradio Space does not install this package; it runs ``app.py`` beside a copy of it.
@@ -163,6 +163,9 @@ def stage_space(dest: str | Path, root: str | Path = ".") -> Path:
     example questions, the measured benchmarks if there are any, and its own three files
     from ``deploy/space``. No video and no index: the index is fetched from its dataset
     repository when the Space starts.
+
+    ``browser`` adds the scripts the page adds a lecture with (``slideseek vendor``), which
+    a Space that takes people's own lectures serves: among them a 27 MB WebAssembly file.
     """
     dest, root = Path(dest), Path(root)
     source = root / "deploy" / "space"
@@ -175,12 +178,20 @@ def stage_space(dest: str | Path, root: str | Path = ".") -> Path:
     package = Path(__file__).parent
     usual = shutil.ignore_patterns("__pycache__", "*.pyc", ".*")
     # The browser's speech-recognition scripts (`slideseek vendor`) are fetched, not kept in
-    # git, and no page the Space serves uses them yet; only the lab does.
+    # git, and only a Space that takes people's own lectures needs them.
     fetched = package / "web" / "static" / "vendor"
+    if browser:
+        from slideseek.web.vendor import VENDOR_DIR, missing
+
+        if missing(VENDOR_DIR):
+            raise FileNotFoundError(
+                "the scripts that add a lecture in the browser are not here: run "
+                "`slideseek vendor` first"
+            )
 
     def ignore(directory: str, names: list[str]) -> set[str]:
         skipped = set(usual(directory, names))
-        if Path(directory) == fetched:
+        if Path(directory) == fetched and not browser:
             skipped.add("browser")
         return skipped
 
@@ -207,6 +218,7 @@ def push_space(
     hardware: str = ZERO_GPU,
     accounts_repo: str | None = None,
     admin: str | None = None,
+    libraries_repo: str | None = None,
 ) -> str:
     """Create or update the Hugging Face Space that serves ``index_repo``. Returns its URL.
 
@@ -220,6 +232,11 @@ def push_space(
 
     ``admin`` is the username of the default admin (``SLIDESEEK_ADMIN``): an account that
     has been signed up for on the Space already.
+
+    ``libraries_repo`` lets people add their own lectures from the browser, and is the
+    private dataset a copy of them is kept in (``SLIDESEEK_LIBRARIES_REPO``), with the same
+    token as the accounts. It is created, private, if it does not exist, and refused if it
+    is public. The Space is then given the browser's scripts too (``stage_space``).
     """
     from huggingface_hub import HfApi
 
@@ -229,11 +246,13 @@ def push_space(
             raise ValueError(f"{admin!r} is not a username an account can have")
     api = HfApi(token=token)
     api.repo_info(index_repo, repo_type="dataset")  # fail now, not when the Space starts
-    if accounts_repo:
-        api.create_repo(accounts_repo, repo_type="dataset", private=True, exist_ok=True)
-        if getattr(api.repo_info(accounts_repo, repo_type="dataset"), "private", None) is not True:
+    for private_repo, what in ((accounts_repo, "accounts"), (libraries_repo, "lectures")):
+        if not private_repo:
+            continue
+        api.create_repo(private_repo, repo_type="dataset", private=True, exist_ok=True)
+        if getattr(api.repo_info(private_repo, repo_type="dataset"), "private", None) is not True:
             raise ValueError(
-                f"{accounts_repo} is public; the accounts are only ever copied to a private "
+                f"{private_repo} is public; the {what} are only ever copied to a private "
                 "dataset. Make it private, or name another."
             )
     api.create_repo(
@@ -249,8 +268,10 @@ def push_space(
         api.add_space_variable(repo_id, "SLIDESEEK_ACCOUNTS_REPO", accounts_repo)
     if admin:
         api.add_space_variable(repo_id, "SLIDESEEK_ADMIN", admin)
+    if libraries_repo:
+        api.add_space_variable(repo_id, "SLIDESEEK_LIBRARIES_REPO", libraries_repo)
     with tempfile.TemporaryDirectory() as staging:
-        stage_space(staging, root)
+        stage_space(staging, root, browser=bool(libraries_repo))
         api.upload_folder(
             folder_path=staging,
             repo_id=repo_id,

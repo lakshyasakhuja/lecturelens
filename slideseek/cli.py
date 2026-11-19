@@ -563,6 +563,13 @@ def deploy(
         help="Username of the default admin, an account already signed up for on the Space. "
         "It is made an admin at start-up, and no other admin can change or delete it.",
     ),
+    libraries_repo: str | None = typer.Option(
+        None,
+        "--libraries-repo",
+        help="Let people add their own lectures from the browser, and keep a copy of them in "
+        "this private dataset, e.g. user/slideseek-libraries. Created, private, if missing; "
+        "written with the same token as the accounts.",
+    ),
 ) -> None:
     """Deploy the web app as a Hugging Face Space on ZeroGPU, serving a published index.
 
@@ -573,6 +580,13 @@ def deploy(
     setup_logging()
     from slideseek.publish import push_space
 
+    if libraries_repo:
+        from slideseek.web.vendor import VendorError, fetch
+
+        try:
+            fetch()  # the page's speech recognition, checked by hash
+        except (VendorError, OSError) as err:
+            fail(str(err))
     try:
         url = push_space(
             repo_id,
@@ -581,6 +595,7 @@ def deploy(
             hardware=hardware,
             accounts_repo=accounts_repo,
             admin=admin,
+            libraries_repo=libraries_repo,
         )
     except (FileNotFoundError, ValueError) as err:
         fail(str(err))

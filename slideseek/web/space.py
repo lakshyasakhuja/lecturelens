@@ -57,6 +57,7 @@ from slideseek.web.server import (
     BadRequest,
     accounts_from_env,
     create_app,
+    libraries_from_env,
     load_benchmark,
     load_examples,
     load_index_from_env,
@@ -98,6 +99,15 @@ def default_database_url() -> str:
             "accounts will be lost when the Space restarts"
         )
     return DEFAULT_DATABASE_URL
+
+
+def default_libraries_dir() -> Path:
+    """Where people's own lectures go without ``SLIDESEEK_LIBRARIES``: persistent storage
+    if the Space has it, or else a directory restored from ``SLIDESEEK_LIBRARIES_REPO``."""
+    data = Path("/data")
+    if data.is_dir() and os.access(data, os.W_OK):
+        return data / "slideseek-libraries"
+    return Path("libraries")
 
 
 def request_cookies(request: Any) -> dict[str, str]:
@@ -225,7 +235,9 @@ def create_space_from_env() -> gradio.Server:
     device of the query encoders, ``cpu`` unless set), and one more: ``SLIDESEEK_RERANK``,
     which turns reranking on when it is ``1``; and ``SLIDESEEK_ACCOUNTS_REPO`` with
     ``SLIDESEEK_ACCOUNTS_TOKEN``, or ``SLIDESEEK_DATABASE_URL``, for where the accounts are
-    kept (see ``accounts_from_env``, and ``default_database_url`` for when neither is set).
+    kept (see ``accounts_from_env``, and ``default_database_url`` for when neither is set);
+    and ``SLIDESEEK_LIBRARIES_REPO`` for the private dataset that keeps a copy of the
+    lectures people add themselves (``libraries_from_env``).
     """
     from slideseek.logs import configure_logging
 
@@ -233,7 +245,8 @@ def create_space_from_env() -> gradio.Server:
     # The reranker is tokenised in this process and scored in one forked from it.
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     index = load_index_from_env()
-    return create_space(
+    folder, copy = libraries_from_env(default_libraries_dir())
+    server = create_space(
         index,
         rerank=rerank_enabled(),
         examples=load_examples(
@@ -247,8 +260,11 @@ def create_space_from_env() -> gradio.Server:
         ),
         device=os.environ.get("SLIDESEEK_DEVICE", "cpu"),
         accounts=accounts_from_env(default_database_url()),
-        library=os.environ.get("SLIDESEEK_LIBRARIES", "").strip() or None,
+        library=folder,
     )
+    if copy is not None:
+        copy.watch(server.state.library)
+    return server
 
 
 def launch(server: gradio.Server, **options: Any):

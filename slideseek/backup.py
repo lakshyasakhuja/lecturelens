@@ -14,6 +14,10 @@ kept in a private dataset repository on the Hub, which is reached over HTTPS:
 
 A restart therefore loses nothing; a crash loses at most the last two minutes.
 
+The lectures people add themselves (``slideseek.library``) are copied the same way, to a
+second private dataset, by ``LibraryBackup``: one folder per lecture, uploaded when the
+lecture is ready and deleted, with the history squashed, when it is.
+
 Three rules keep the copy safe:
 
 * Nothing is uploaded to a public repository. The dataset is checked before every upload.
@@ -38,6 +42,7 @@ import sqlite3
 import tempfile
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
@@ -78,6 +83,31 @@ def _repository_not_found() -> type[Exception]:
     from huggingface_hub.errors import RepositoryNotFoundError
 
     return RepositoryNotFoundError
+
+
+def ensure_private(api: Any, repo_id: str, what: str = "accounts") -> None:
+    """Make sure the dataset exists and is private, creating it (private) if need be.
+
+    ``what`` is what is copied there, for the messages.
+    """
+    try:
+        info = api.repo_info(repo_id, repo_type="dataset")
+    except _repository_not_found() as missing:
+        try:
+            api.create_repo(repo_id, repo_type="dataset", private=True, exist_ok=True)
+            info = api.repo_info(repo_id, repo_type="dataset")
+        except Exception as error:
+            raise BackupError(
+                f"cannot find or create the dataset {repo_id}. Create it as a private "
+                "dataset on huggingface.co, and give the token write access to it "
+                f"({error})"
+            ) from missing
+        log.info("created the private dataset %s for the %s", repo_id, what)
+    if getattr(info, "private", None) is not True:
+        raise BackupError(
+            f"the dataset {repo_id} is public. {what.capitalize()} are never copied to a "
+            "public dataset: make it private under its Settings on huggingface.co."
+        )
 
 
 def _read_only(path: Path) -> sqlite3.Connection:
@@ -165,24 +195,7 @@ class DatasetBackup:
 
     def check_private(self) -> None:
         """Make sure the dataset exists and is private, creating it (private) if need be."""
-        try:
-            info = self.api.repo_info(self.repo_id, repo_type="dataset")
-        except _repository_not_found() as missing:
-            try:
-                self.api.create_repo(self.repo_id, repo_type="dataset", private=True, exist_ok=True)
-                info = self.api.repo_info(self.repo_id, repo_type="dataset")
-            except Exception as error:
-                raise BackupError(
-                    f"cannot find or create the dataset {self.repo_id}. Create it as a private "
-                    "dataset on huggingface.co, and give the token write access to it "
-                    f"({error})"
-                ) from missing
-            log.info("created the private dataset %s for the accounts", self.repo_id)
-        if getattr(info, "private", None) is not True:
-            raise BackupError(
-                f"the dataset {self.repo_id} is public. Accounts are never copied to a public "
-                "dataset: make it private under its Settings on huggingface.co."
-            )
+        ensure_private(self.api, self.repo_id, "accounts")
 
     def restore(self, *, attempts: int = 4, wait: float = 2.0) -> bool:
         """Put the dataset's copy of the database at ``path``, replacing any file there.
@@ -405,6 +418,286 @@ def on_sigterm(cleanup: Callable[[], Any]) -> bool:
 
     signal.signal(signal.SIGTERM, stop)
     return True
+
+
+# ---- the lectures people add themselves ------------------------------------------------------
+
+# What is copied of a finished lecture: its state and its own index. The full-size stills are
+# deleted once the index is made, and the other stage files are not needed to search it.
+LECTURE_FILES = ("lecture.json", "index/**")
+# Files of an index that the Hub keeps in its large-file storage.
+_LARGE = (".npy", ".parquet", ".jpg")
+
+
+def _missing(error: Exception) -> bool:
+    """Is this the Hub saying that what was asked for is not there?"""
+    if isinstance(error, (*_not_found_errors(), _repository_not_found())):
+        return True
+    return getattr(getattr(error, "response", None), "status_code", None) == 404
+
+
+class LibraryBackup:
+    """Keeps the finished lectures under ``root`` (a ``Library``'s) copied to ``repo_id``.
+
+    Call ``restore`` before the library is opened, ``watch`` it, and ``close`` on the way
+    out. Uploads and deletions happen on a thread of their own, one batch at a time; a batch
+    that fails is tried again later, doubling the wait. When a lecture or a whole library is
+    deleted, the dataset's history is squashed and the large files nothing points at any
+    more are deleted too, so a deleted lecture does not live on in an old commit.
+    """
+
+    def __init__(
+        self,
+        repo_id: str,
+        root: str | Path,
+        *,
+        token: str | None = None,
+        api: Any | None = None,
+        retry: float = 30.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if api is None:
+            from huggingface_hub import HfApi
+
+            api = HfApi(token=token)
+        self.repo_id, self.root, self.api = repo_id, Path(root), api
+        self.retry = retry
+        self._clock = clock
+        self._lock = threading.Condition(threading.RLock())
+        self._upload_lock = threading.RLock()
+        # (owner, lecture id or None for the whole library) -> "upload", "title" or "delete"
+        self._pending: OrderedDict[tuple[str, str | None], str] = OrderedDict()
+        self._squash_owed = False
+        self._failures = 0
+        self._next_allowed = float("-inf")
+        self._thread: threading.Thread | None = None
+        self._closed = False
+        self.commits = 0
+
+    def __repr__(self) -> str:
+        return f"LibraryBackup({self.repo_id!r}, {str(self.root)!r})"
+
+    def check_private(self) -> None:
+        ensure_private(self.api, self.repo_id, "lectures")
+
+    def restore(self, *, attempts: int = 4, wait: float = 2.0) -> int:
+        """Copy the dataset's lectures into ``root``. Returns how many were put there.
+
+        A lecture already in ``root`` is left as it is. Raises ``BackupError`` if the copy
+        cannot be fetched after ``attempts`` tries.
+        """
+        from slideseek.library import LECTURE_ID, OWNER, STATE_FILE
+
+        last: Exception | None = None
+        for attempt in range(attempts):
+            if attempt:
+                time.sleep(wait * 2 ** (attempt - 1))
+            try:
+                self.check_private()
+                with tempfile.TemporaryDirectory() as folder:
+                    self.api.snapshot_download(
+                        repo_id=self.repo_id, repo_type="dataset", local_dir=folder
+                    )
+                    restored = 0
+                    for state in sorted(Path(folder).glob(f"*/*/{STATE_FILE}")):
+                        lecture, owner = state.parent, state.parent.parent
+                        if not (OWNER.fullmatch(owner.name) and LECTURE_ID.fullmatch(lecture.name)):
+                            continue
+                        target = self.root / owner.name / lecture.name
+                        if target.exists():
+                            continue
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        partial = target.with_name(target.name + ".restoring")
+                        shutil.rmtree(partial, ignore_errors=True)
+                        shutil.copytree(lecture, partial)
+                        os.replace(partial, target)
+                        restored += 1
+                log.info("restored %d lecture(s) from the dataset %s", restored, self.repo_id)
+                return restored
+            except BackupError:
+                raise
+            except Exception as error:  # the hub client raises many unrelated types
+                last = error
+                log.warning(
+                    "could not download the lectures from %s (try %d of %d): %s",
+                    self.repo_id, attempt + 1, attempts, error,
+                )  # fmt: skip
+        raise BackupError(
+            f"could not download the lectures from {self.repo_id}. Last error: {last}"
+        ) from last
+
+    # -- changes
+
+    def changed(self, change: str, owner: str, lecture_id: str | None) -> None:
+        """Note a change to the library, to copy soon. Meant to be ``Library.on_change``."""
+        from slideseek.library import (
+            LECTURE_CHANGED,
+            LECTURE_DELETED,
+            LECTURE_READY,
+            OWNER_DELETED,
+        )
+
+        with self._lock:
+            if change == OWNER_DELETED:
+                for key in [key for key in self._pending if key[0] == owner]:
+                    del self._pending[key]
+                self._pending[(owner, None)] = "delete"
+            elif change == LECTURE_DELETED:
+                self._pending.pop((owner, lecture_id), None)
+                self._pending[(owner, lecture_id)] = "delete"
+            elif change == LECTURE_READY:
+                self._pending[(owner, lecture_id)] = "upload"
+            elif change == LECTURE_CHANGED:
+                if self._pending.get((owner, lecture_id)) not in ("upload", "delete"):
+                    self._pending[(owner, lecture_id)] = "title"
+            else:
+                return
+            if self._closed:
+                return
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._run, name="library-backup", daemon=True
+                )
+                self._thread.start()
+            self._lock.notify_all()
+
+    @property
+    def pending(self) -> bool:
+        with self._lock:
+            return bool(self._pending) or self._squash_owed
+
+    def _run(self) -> None:
+        while True:
+            with self._lock:
+                while not self._closed and not (self._pending or self._squash_owed):
+                    self._lock.wait()
+                if self._closed:
+                    return
+                left = self._next_allowed - self._clock()
+                if left > 0:
+                    self._lock.wait(left)
+                    continue
+            self.flush()
+
+    def flush(self) -> bool:
+        """Copy every pending change now. ``True`` once the dataset is up to date."""
+        with self._upload_lock:
+            with self._lock:
+                batch = list(self._pending.items())
+                self._pending.clear()
+            done = 0
+            try:
+                if batch or self._squash_owed:
+                    self.check_private()
+                for (owner, lecture_id), action in batch:
+                    self._apply(owner, lecture_id, action)
+                    done += 1
+                if self._squash_owed:
+                    self._squash()
+            except Exception as error:  # the hub client raises many unrelated types
+                with self._lock:
+                    newer = self._pending
+                    self._pending = OrderedDict(batch[done:])
+                    self._pending.update(newer)
+                    self._failures += 1
+                    backoff = min(self.retry * 2**self._failures, MAX_BACKOFF)
+                    self._next_allowed = self._clock() + backoff
+                log.warning(
+                    "could not copy the lectures to %s; trying again in %d s: %s",
+                    self.repo_id, backoff, error,
+                )  # fmt: skip
+                return False
+            with self._lock:
+                self._failures = 0
+            return True
+
+    def _apply(self, owner: str, lecture_id: str | None, action: str) -> None:
+        where = f"{owner}/{lecture_id}" if lecture_id else owner
+        folder = self.root / where
+        if action == "delete":
+            try:
+                self.api.delete_folder(
+                    where, self.repo_id, repo_type="dataset", commit_message="Remove a lecture"
+                )
+                self.commits += 1
+            except Exception as error:
+                if not _missing(error):
+                    raise  # otherwise it was never copied: there is nothing to delete
+            self._squash_owed = True
+        elif not (folder / "lecture.json").is_file():
+            return  # deleted since; its deletion follows
+        elif action == "upload":
+            self.api.upload_folder(
+                repo_id=self.repo_id,
+                folder_path=str(folder),
+                path_in_repo=where,
+                repo_type="dataset",
+                allow_patterns=list(LECTURE_FILES),
+                commit_message="Add a lecture",
+            )
+            self.commits += 1
+        elif action == "title":
+            self.api.upload_file(
+                path_or_fileobj=str(folder / "lecture.json"),
+                path_in_repo=f"{where}/lecture.json",
+                repo_id=self.repo_id,
+                repo_type="dataset",
+                commit_message="Rename a lecture",
+            )
+            self.commits += 1
+
+    def _squash(self) -> None:
+        self.api.super_squash_history(
+            self.repo_id, repo_type="dataset", commit_message="The lectures"
+        )
+        self._squash_owed = False
+        log.info("squashed the history of %s", self.repo_id)
+        self._forget_unused_files()
+
+    def _forget_unused_files(self) -> None:
+        """Delete the large files no file in the dataset points at any more."""
+        try:
+            current, unknown = set(), False
+            for entry in self.api.list_repo_tree(self.repo_id, repo_type="dataset", recursive=True):
+                lfs = getattr(entry, "lfs", None)
+                if lfs is not None:
+                    current.add(getattr(lfs, "sha256", None) or lfs["sha256"])
+                elif str(getattr(entry, "path", "")).endswith(_LARGE):
+                    unknown = True  # a large file the listing gives no hash for
+            if unknown:
+                log.warning("the Hub did not say where every large file is; none were deleted")
+                return
+            unused = [
+                item
+                for item in self.api.list_lfs_files(self.repo_id, repo_type="dataset")
+                if item.file_oid not in current
+            ]
+            if unused:
+                self.api.permanently_delete_lfs_files(self.repo_id, unused, repo_type="dataset")
+                log.info("deleted %d large file(s) of removed lectures", len(unused))
+        except Exception as error:  # the copy is up to date; this is tidying up
+            log.warning("could not delete the files of removed lectures: %s", error)
+
+    # -- stopping
+
+    def close(self, timeout: float = 20.0) -> bool:
+        """Copy whatever has not been copied, and stop. ``True`` if the dataset is current."""
+        with self._lock:
+            self._closed = True
+            self._lock.notify_all()
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
+        done = self.flush()
+        if not done:
+            log.error("the last changes to the lectures were not copied to %s", self.repo_id)
+        return done
+
+    def watch(self, library: Any) -> None:
+        """Copy the library's changes as they happen, and once more at exit."""
+        library.on_change = self.changed
+        atexit.register(self.close)
+        on_sigterm(self.close)
 
 
 def backed_up_accounts(

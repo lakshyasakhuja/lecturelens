@@ -272,3 +272,53 @@ def test_push_space_stops_before_creating_anything_if_the_index_is_not_published
     with pytest.raises(RuntimeError, match="no such repository"):
         push_space("someone/slideseek", "someone/missing", root=ROOT)
     assert [call[0] for call in calls] == ["init", "repo_info"]
+
+
+def test_a_space_that_takes_peoples_lectures_gets_a_private_dataset_and_the_scripts(monkeypatch):
+    import slideseek.web.vendor as vendor
+
+    calls = []
+    _fake_hub(monkeypatch, calls)
+    monkeypatch.setattr(vendor, "missing", lambda dest=None: [])
+    push_space(
+        "someone/slideseek",
+        "someone/lectures-index",
+        root=ROOT,
+        libraries_repo="someone/slideseek-libraries",
+    )
+    assert (
+        "create_repo",
+        "someone/slideseek-libraries",
+        {"repo_type": "dataset", "private": True, "exist_ok": True},
+    ) in calls
+    assert (
+        "add_space_variable",
+        "someone/slideseek",
+        "SLIDESEEK_LIBRARIES_REPO",
+        "someone/slideseek-libraries",
+    ) in calls
+    upload = next(call[1] for call in calls if call[0] == "upload_folder")
+    fetched = sorted(vendor.VENDOR_DIR.glob("*")) if vendor.VENDOR_DIR.is_dir() else []
+    for path in fetched:
+        assert f"slideseek/web/static/vendor/browser/{path.name}" in upload["files"]
+
+
+def test_a_public_dataset_for_peoples_lectures_is_refused(monkeypatch):
+    calls = []
+    _fake_hub(monkeypatch, calls)
+    with pytest.raises(ValueError, match="lectures are only ever copied to a private"):
+        push_space(
+            "someone/slideseek",
+            "someone/lectures-index",
+            root=ROOT,
+            libraries_repo="someone/public",
+        )
+    assert "upload_folder" not in [call[0] for call in calls]
+
+
+def test_staging_the_scripts_needs_them_fetched_first(tmp_path, monkeypatch):
+    import slideseek.web.vendor as vendor
+
+    monkeypatch.setattr(vendor, "missing", lambda dest=None: ["transformers.min.js"])
+    with pytest.raises(FileNotFoundError, match="slideseek vendor"):
+        stage_space(tmp_path / "space", ROOT, browser=True)

@@ -734,6 +734,29 @@ def accounts_from_env(default: str = DEFAULT_DATABASE_URL) -> AccountStore:
     return store
 
 
+def libraries_from_env(default: str | Path = "libraries"):
+    """Where the lectures people add themselves are kept, and the copy kept of them.
+
+    ``SLIDESEEK_LIBRARIES`` names the directory; ``SLIDESEEK_LIBRARIES_REPO`` a private
+    dataset to keep a copy in, restored into the directory now (with ``default`` as the
+    directory if none is named). Returns ``(directory, LibraryBackup)``, either of them
+    ``None``. Raises ``BackupError`` if there is a copy that cannot be restored.
+    """
+    folder = os.environ.get("SLIDESEEK_LIBRARIES", "").strip()
+    repo = os.environ.get("SLIDESEEK_LIBRARIES_REPO", "").strip()
+    if not folder and not repo:
+        return None, None
+    folder = Path(folder or default)
+    if not repo:
+        return folder, None
+    from slideseek.backup import LibraryBackup
+
+    copy = LibraryBackup(repo, folder, token=accounts_token_from_env())
+    copy.restore()
+    log.info("people's own lectures are kept in %s, with a copy in the dataset %s", folder, repo)
+    return folder, copy
+
+
 def create_app_from_env() -> FastAPI:
     """App factory for ``uvicorn slideseek.web.server:create_app_from_env --factory``.
 
@@ -755,13 +778,15 @@ def create_app_from_env() -> FastAPI:
     ``SLIDESEEK_ACCOUNTS_TOKEN``  a token that can write to that dataset (or ``HF_TOKEN``)
     ``SLIDESEEK_ADMIN``       the username of the default admin, an account that exists
     ``SLIDESEEK_LIBRARIES``   a directory to keep the lectures people add themselves in;
-                                without it, nobody can add any
+                                without it (or the next), nobody can add any
+    ``SLIDESEEK_LIBRARIES_REPO``  a private Hugging Face dataset to keep a copy of them in
     """
     from slideseek.logs import configure_logging
 
     configure_logging()
     index = load_index_from_env()
-    return create_app(
+    folder, copy = libraries_from_env()
+    app = create_app(
         index,
         videos_dir=os.environ.get("SLIDESEEK_VIDEOS") or None,
         examples=load_examples(
@@ -775,5 +800,8 @@ def create_app_from_env() -> FastAPI:
         ),
         device=os.environ.get("SLIDESEEK_DEVICE", "cpu"),
         accounts=accounts_from_env(),
-        library=os.environ.get("SLIDESEEK_LIBRARIES", "").strip() or None,
+        library=folder,
     )
+    if copy is not None:
+        copy.watch(app.state.library)
+    return app
